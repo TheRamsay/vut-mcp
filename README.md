@@ -36,17 +36,7 @@ uv run vut-studis-debug assessment-message FLP --item 2 --entry 1
 
 ## Raycast
 
-The simplest personal-assistant integration is a Raycast Script Command.
-
-1. Open Raycast Settings.
-2. Go to Extensions -> Script Commands.
-3. Add the repository `raycast/` folder as a script directory.
-4. Run `VUT Today` from Raycast.
-
-The command shows pending Studis actions for the next 7 days with severity,
-reason, and suggested next step.
-
-For a native Raycast list UI, use the extension:
+Run the native Raycast extension in development mode:
 
 ```bash
 cd raycast-extension
@@ -54,8 +44,9 @@ pnpm install
 pnpm dev
 ```
 
-Raycast will open the development extension. Configure the command preferences
-if your repository path or `uv` path differs from the defaults.
+Raycast will open the development extension. Run `VUT Today` from Raycast and
+configure the command preferences if your repository path or `uv` path differs
+from the defaults.
 
 ## Authentication
 
