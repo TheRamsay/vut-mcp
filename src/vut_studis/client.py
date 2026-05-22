@@ -84,8 +84,23 @@ class StudisClient:
                 "Studis session expired. Run `uv run vut-studis-debug login-refresh-session`."
             )
 
-    async def get_courses(self) -> list[Course]:
-        raise NotImplementedError("Studis courses endpoint/parser is not implemented yet.")
+    async def get_courses(self, *, force_refresh: bool = False) -> list[Course]:
+        grades = await self.get_grades(force_refresh=force_refresh)
+        courses: list[Course] = []
+        seen: set[str] = set()
+
+        for grade in grades:
+            if grade.course_code is None:
+                continue
+
+            normalized = grade.course_code.casefold()
+            if normalized in seen:
+                continue
+
+            seen.add(normalized)
+            courses.append(_course_from_grade(grade))
+
+        return courses
 
     async def get_schedule(
         self,
@@ -406,6 +421,22 @@ def _course_codes_from_grades(grades: list[Grade]) -> list[str]:
         seen.add(normalized)
         codes.append(grade.course_code)
     return codes
+
+
+def _course_from_grade(grade: Grade) -> Course:
+    return Course(
+        code=grade.course_code or "",
+        name=grade.course_name,
+        academic_year=grade.academic_year,
+        semester=grade.semester,
+        language=grade.language,
+        course_type=grade.course_type,
+        credits=grade.credits,
+        in_study_plan=grade.in_study_plan,
+        completion=grade.completion,
+        elearning=grade.elearning,
+        absolved=grade.absolved,
+    )
 
 
 def _find_assessment_message_target(

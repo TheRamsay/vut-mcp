@@ -59,6 +59,18 @@ def pending_actions(
 
 
 @app.command()
+def courses(
+    live: Annotated[
+        bool,
+        typer.Option("--live", help="Bypass the local cache and fetch from Studis."),
+    ] = False,
+) -> None:
+    """Fetch courses from the electronic index."""
+    result = asyncio.run(StudisClient().get_courses(force_refresh=live))
+    console.print([course.model_dump(mode="json") for course in result])
+
+
+@app.command()
 def grades(
     course_code: Annotated[
         str | None,

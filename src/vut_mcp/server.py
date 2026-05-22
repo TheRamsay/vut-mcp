@@ -32,6 +32,12 @@ async def vut_get_pending_actions(
 
 
 @mcp.tool()
+async def vut_get_courses(force_refresh: bool = False):
+    """Get courses from the student's VUT Studis electronic index."""
+    return await get_studis_client().get_courses(force_refresh=force_refresh)
+
+
+@mcp.tool()
 async def vut_get_grades(course_code: str | None = None, force_refresh: bool = False):
     """Get grades and points from the student's VUT Studis electronic index."""
     client = get_studis_client()

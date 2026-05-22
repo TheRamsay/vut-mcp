@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import date, datetime
 from enum import StrEnum
 
@@ -11,8 +13,15 @@ class StudisModel(BaseModel):
 class Course(StudisModel):
     code: str
     name: str
+    academic_year: str | None = None
     semester: str | None = None
-    completion: str | None = None
+    language: CourseLanguage | None = None
+    course_type: CourseType | None = None
+    credits: float | None = None
+    in_study_plan: bool | None = None
+    completion: CompletionType | None = None
+    elearning: bool | None = None
+    absolved: bool | None = None
 
 
 class ScheduleItem(StudisModel):
