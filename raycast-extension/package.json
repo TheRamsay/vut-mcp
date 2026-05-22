@@ -1,0 +1,60 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "vut-studis",
+  "title": "VUT Studis",
+  "description": "Personal VUT Studis assistant commands.",
+  "icon": "extension-icon.png",
+  "author": "ramsay",
+  "license": "MIT",
+  "commands": [
+    {
+      "name": "vut-today",
+      "title": "VUT Today",
+      "description": "Show actionable VUT Studis items for the next few days.",
+      "mode": "view",
+      "preferences": [
+        {
+          "name": "repositoryPath",
+          "title": "Repository Path",
+          "description": "Path to the local vut-mcp repository.",
+          "type": "textfield",
+          "required": true,
+          "default": "/Users/ramsay/dev/vut-mcp"
+        },
+        {
+          "name": "uvPath",
+          "title": "uv Path",
+          "description": "Full path to uv.",
+          "type": "textfield",
+          "required": true,
+          "default": "/opt/homebrew/bin/uv"
+        },
+        {
+          "name": "horizonDays",
+          "title": "Horizon Days",
+          "description": "Only show actions due within this many days.",
+          "type": "textfield",
+          "required": true,
+          "default": "7"
+        }
+      ]
+    }
+  ],
+  "dependencies": {
+    "@raycast/api": "^1.104.18"
+  },
+  "devDependencies": {
+    "@raycast/eslint-config": "^2.1.1",
+    "@types/node": "^24.0.0",
+    "eslint": "^9.0.0",
+    "prettier": "^3.0.0",
+    "typescript": "^5.0.0"
+  },
+  "scripts": {
+    "build": "ray build -e dist",
+    "dev": "ray develop",
+    "lint": "ray lint",
+    "fix-lint": "ray lint --fix",
+    "typecheck": "tsc --noEmit"
+  }
+}

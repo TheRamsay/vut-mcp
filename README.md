@@ -46,6 +46,17 @@ The simplest personal-assistant integration is a Raycast Script Command.
 The command shows pending Studis actions for the next 7 days with severity,
 reason, and suggested next step.
 
+For a native Raycast list UI, use the extension:
+
+```bash
+cd raycast-extension
+npm install
+npm run dev
+```
+
+Raycast will open the development extension. Configure the command preferences
+if your repository path or `uv` path differs from the defaults.
+
 ## Authentication
 
 The current MVP uses the VUT SSO username/password flow to refresh a short-lived
