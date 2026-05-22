@@ -39,6 +39,30 @@
           "default": "7"
         }
       ]
+    },
+    {
+      "name": "vut-grades",
+      "title": "VUT Grades",
+      "description": "Show total points and grades from the VUT Studis electronic index.",
+      "mode": "view",
+      "preferences": [
+        {
+          "name": "repositoryPath",
+          "title": "Repository Path",
+          "description": "Path to the local vut-mcp repository.",
+          "type": "textfield",
+          "required": true,
+          "default": "/Users/ramsay/dev/vut-mcp"
+        },
+        {
+          "name": "uvPath",
+          "title": "uv Path",
+          "description": "Full path to uv.",
+          "type": "textfield",
+          "required": true,
+          "default": "/opt/homebrew/bin/uv"
+        }
+      ]
     }
   ],
   "dependencies": {

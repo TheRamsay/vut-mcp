@@ -8,17 +8,10 @@ import {
   getPreferenceValues,
   showToast,
 } from "@raycast/api";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { useEffect, useState } from "react";
+import { type Preferences, runStudisPython } from "./studis";
 
-const execFileAsync = promisify(execFile);
-
-type Preferences = {
-  repositoryPath: string;
-  uvPath: string;
-  horizonDays: string;
-};
+type TodayPreferences = Preferences & { horizonDays: string };
 
 type PendingAction = {
   type: string;
@@ -53,7 +46,7 @@ asyncio.run(main())
 `;
 
 export default function Command() {
-  const preferences = getPreferenceValues<Preferences>();
+  const preferences = getPreferenceValues<TodayPreferences>();
   const horizonDays = Number.parseInt(preferences.horizonDays, 10);
   const [state, setState] = useState<{
     isLoading: boolean;
@@ -69,23 +62,12 @@ export default function Command() {
     }));
 
     try {
-      const { stdout } = await execFileAsync(
-        preferences.uvPath,
-        [
-          "run",
-          "python",
-          "-c",
-          PYTHON,
-          String(Number.isFinite(horizonDays) ? horizonDays : 7),
-        ],
-        {
-          cwd: preferences.repositoryPath,
-          maxBuffer: 1024 * 1024 * 10,
-        },
-      );
+      const actions = await runStudisPython<PendingAction[]>(PYTHON, [
+        String(Number.isFinite(horizonDays) ? horizonDays : 7),
+      ]);
       setState({
         isLoading: false,
-        actions: JSON.parse(stdout) as PendingAction[],
+        actions,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

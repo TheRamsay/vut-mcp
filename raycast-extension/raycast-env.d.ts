@@ -22,10 +22,19 @@ declare namespace Preferences {
   /** Horizon Days - Only show actions due within this many days. */
   "horizonDays": string
 }
+  /** Preferences accessible in the `vut-grades` command */
+  export type VutGrades = ExtensionPreferences & {
+  /** Repository Path - Path to the local vut-mcp repository. */
+  "repositoryPath": string,
+  /** uv Path - Full path to uv. */
+  "uvPath": string
+}
 }
 
 declare namespace Arguments {
   /** Arguments passed to the `vut-today` command */
   export type VutToday = {}
+  /** Arguments passed to the `vut-grades` command */
+  export type VutGrades = {}
 }
 
