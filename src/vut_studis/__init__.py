@@ -5,6 +5,7 @@ from vut_studis.models import (
     AssessmentItem,
     AssessmentMessage,
     AssignmentSubmissionFile,
+    ChangeKind,
     CompletionType,
     Course,
     CourseAssessment,
@@ -19,8 +20,10 @@ from vut_studis.models import (
     GradeValue,
     PendingAction,
     PendingActionType,
+    RecentChanges,
     ScheduleItem,
     StudentSummary,
+    StudisChange,
 )
 
 __all__ = [
@@ -28,6 +31,7 @@ __all__ = [
     "AssessmentEntry",
     "AssessmentItem",
     "AssessmentMessage",
+    "ChangeKind",
     "CompletionType",
     "Course",
     "CourseAssessment",
@@ -43,8 +47,10 @@ __all__ = [
     "LoginAttemptResult",
     "PendingAction",
     "PendingActionType",
+    "RecentChanges",
     "ScheduleItem",
     "StudentSummary",
+    "StudisChange",
     "StudisClient",
     "refresh_session_cookie",
 ]

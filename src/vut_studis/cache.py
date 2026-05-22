@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from pathlib import Path
 from typing import Literal
 
@@ -34,6 +35,7 @@ class CacheStatus:
     enabled: bool
     entries: int
     expired_entries: int
+    state_snapshots: int
     size_bytes: int
 
 
@@ -42,6 +44,16 @@ class _CacheEntry:
     payload_json: str
     fetched_at: datetime
     expires_at: datetime
+
+
+@dataclass(frozen=True)
+class StateSnapshot:
+    resource_type: str
+    resource_id: str
+    payload_json: str | None
+    payload_hash: str | None
+    captured_at: datetime
+    is_deleted: bool
 
 
 class CacheStore:
@@ -107,7 +119,9 @@ class CacheStore:
 
         with self._connection() as connection:
             cursor = connection.execute("DELETE FROM cache_entries")
-            return cursor.rowcount
+            removed = cursor.rowcount
+            cursor = connection.execute("DELETE FROM state_snapshots")
+            return removed + cursor.rowcount
 
     def delete(self, key: str) -> None:
         if self.disabled or not self.path.exists():
@@ -116,6 +130,88 @@ class CacheStore:
         with self._connection() as connection:
             connection.execute("DELETE FROM cache_entries WHERE key = ?", (key,))
 
+    def get_latest_state_snapshots(
+        self,
+        *,
+        scope: str,
+        resource_type: str,
+    ) -> dict[str, StateSnapshot]:
+        if self.disabled or not self.path.exists():
+            return {}
+
+        snapshots: dict[str, StateSnapshot] = {}
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    resource_type,
+                    resource_id,
+                    payload_json,
+                    payload_hash,
+                    captured_at,
+                    is_deleted
+                FROM state_snapshots
+                WHERE scope = ? AND resource_type = ?
+                ORDER BY resource_id ASC, captured_at DESC, id DESC
+                """,
+                (scope, resource_type),
+            ).fetchall()
+
+        for row in rows:
+            resource_id = row["resource_id"]
+            if resource_id in snapshots:
+                continue
+            snapshots[resource_id] = StateSnapshot(
+                resource_type=row["resource_type"],
+                resource_id=resource_id,
+                payload_json=row["payload_json"],
+                payload_hash=row["payload_hash"],
+                captured_at=_from_iso(row["captured_at"]),
+                is_deleted=bool(row["is_deleted"]),
+            )
+
+        return snapshots
+
+    def record_state_snapshot(
+        self,
+        *,
+        scope: str,
+        resource_type: str,
+        resource_id: str,
+        payload_json: str | None,
+        captured_at: datetime,
+        is_deleted: bool = False,
+    ) -> None:
+        if self.disabled:
+            return
+
+        payload_hash = sha256(payload_json.encode("utf-8")).hexdigest() if payload_json else None
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self._connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO state_snapshots (
+                    scope,
+                    resource_type,
+                    resource_id,
+                    payload_json,
+                    payload_hash,
+                    captured_at,
+                    is_deleted
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    scope,
+                    resource_type,
+                    resource_id,
+                    payload_json,
+                    payload_hash,
+                    _to_iso(captured_at),
+                    int(is_deleted),
+                ),
+            )
+
     def status(self) -> CacheStatus:
         if self.disabled or not self.path.exists():
             return CacheStatus(
@@ -123,6 +219,7 @@ class CacheStore:
                 enabled=not self.disabled,
                 entries=0,
                 expired_entries=0,
+                state_snapshots=0,
                 size_bytes=0,
             )
 
@@ -133,12 +230,16 @@ class CacheStore:
                 "SELECT count(*) FROM cache_entries WHERE expires_at <= ?",
                 (now_iso,),
             ).fetchone()[0]
+            state_snapshots = connection.execute(
+                "SELECT count(*) FROM state_snapshots",
+            ).fetchone()[0]
 
         return CacheStatus(
             path=self.path,
             enabled=True,
             entries=entries,
             expired_entries=expired_entries,
+            state_snapshots=state_snapshots,
             size_bytes=self.path.stat().st_size,
         )
 
@@ -235,6 +336,26 @@ class CacheStore:
             """
             CREATE INDEX IF NOT EXISTS idx_cache_entries_expires_at
             ON cache_entries(expires_at)
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS state_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scope TEXT NOT NULL,
+                resource_type TEXT NOT NULL,
+                resource_id TEXT NOT NULL,
+                payload_json TEXT,
+                payload_hash TEXT,
+                captured_at TEXT NOT NULL,
+                is_deleted INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_state_snapshots_latest
+            ON state_snapshots(scope, resource_type, resource_id, captured_at DESC)
             """
         )
         return connection

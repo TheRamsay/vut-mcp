@@ -32,6 +32,12 @@ async def vut_get_pending_actions(
 
 
 @mcp.tool()
+async def vut_get_recent_changes(force_refresh: bool = True):
+    """Detect what changed in Studis since the previous snapshot."""
+    return await get_studis_client().get_recent_changes(force_refresh=force_refresh)
+
+
+@mcp.tool()
 async def vut_get_courses(force_refresh: bool = False):
     """Get courses from the student's VUT Studis electronic index."""
     return await get_studis_client().get_courses(force_refresh=force_refresh)

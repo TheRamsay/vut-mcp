@@ -69,6 +69,30 @@ class PendingAction(StudisModel):
     detail_url: str | None = None
 
 
+class ChangeKind(StrEnum):
+    ADDED = "added"
+    REMOVED = "removed"
+    UPDATED = "updated"
+
+
+class StudisChange(StudisModel):
+    kind: ChangeKind
+    resource_type: str
+    resource_id: str
+    title: str
+    course_code: str | None = None
+    changed_fields: list[str] = Field(default_factory=list)
+    before: dict[str, object] | None = None
+    after: dict[str, object] | None = None
+    detected_at: datetime
+
+
+class RecentChanges(StudisModel):
+    baseline_created: bool
+    captured_at: datetime
+    changes: list[StudisChange]
+
+
 class CourseLanguage(StrEnum):
     CZECH = "cs"
     ENGLISH = "en"

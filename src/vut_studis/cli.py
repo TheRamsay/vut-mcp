@@ -64,6 +64,18 @@ def pending_actions(
     console.print([action.model_dump(mode="json") for action in actions])
 
 
+@app.command("recent-changes")
+def recent_changes(
+    live: Annotated[
+        bool,
+        typer.Option("--live/--cached", help="Fetch live data before comparing snapshots."),
+    ] = True,
+) -> None:
+    """Detect changes since the previous local Studis snapshot."""
+    result = asyncio.run(StudisClient().get_recent_changes(force_refresh=live))
+    console.print(result.model_dump(mode="json"))
+
+
 @app.command()
 def courses(
     live: Annotated[
@@ -173,6 +185,7 @@ def cache_status() -> None:
             "enabled": status.enabled,
             "entries": status.entries,
             "expired_entries": status.expired_entries,
+            "state_snapshots": status.state_snapshots,
             "size_bytes": status.size_bytes,
         }
     )

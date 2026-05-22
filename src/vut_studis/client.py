@@ -22,6 +22,11 @@ from vut_studis.cache import (
     encode_model,
     encode_model_list,
 )
+from vut_studis.change_detection import (
+    ChangeResource,
+    detect_and_record_changes,
+    model_change_resource,
+)
 from vut_studis.config import Settings, load_settings
 from vut_studis.errors import StudisAuthError
 from vut_studis.models import (
@@ -35,6 +40,7 @@ from vut_studis.models import (
     ExamTerm,
     Grade,
     PendingAction,
+    RecentChanges,
     ScheduleItem,
     StudentSummary,
 )
@@ -369,6 +375,25 @@ class StudisClient:
             pending_actions=pending_actions,
         )
 
+    async def get_recent_changes(self, *, force_refresh: bool = True) -> RecentChanges:
+        grades = await self.get_grades(force_refresh=force_refresh)
+        courses = courses_from_grades(grades)
+        pending_actions = await self.get_pending_actions(
+            course_codes=[course.code for course in courses],
+            force_refresh=force_refresh,
+        )
+        resources = [
+            *_course_change_resources(courses),
+            *_grade_change_resources(grades),
+            *_pending_action_change_resources(pending_actions),
+        ]
+        return detect_and_record_changes(
+            cache=self.cache,
+            scope=self._cache_scope(),
+            resources=resources,
+            resource_types=["course", "grade", "pending_action"],
+        )
+
     def _cache_key(self, resource_type: str, *parts: str) -> str:
         key_parts = ["v1", self._cache_scope(), resource_type, *parts]
         return ":".join(key_parts)
@@ -404,3 +429,63 @@ def _find_course_detail_path(html: str, course_code: str) -> str:
                 return path + (f"?{parsed.query}" if parsed.query else "")
 
     raise StudisAuthError(f"Assessment detail link for course {course_code!r} was not found.")
+
+
+def _course_change_resources(courses: list[Course]) -> list[ChangeResource]:
+    return [
+        model_change_resource(
+            resource_type="course",
+            resource_id=course.code,
+            title=f"{course.code} {course.name}",
+            course_code=course.code,
+            model=course,
+        )
+        for course in courses
+    ]
+
+
+def _grade_change_resources(grades: list[Grade]) -> list[ChangeResource]:
+    resources: list[ChangeResource] = []
+    for grade in grades:
+        if grade.course_code is None:
+            continue
+
+        parts = [
+            grade.academic_year or "",
+            grade.semester or "",
+            grade.course_code,
+        ]
+        resources.append(
+            model_change_resource(
+                resource_type="grade",
+                resource_id=":".join(parts),
+                title=f"{grade.course_code} {grade.course_name}",
+                course_code=grade.course_code,
+                model=grade,
+            )
+        )
+    return resources
+
+
+def _pending_action_change_resources(actions: list[PendingAction]) -> list[ChangeResource]:
+    resources: list[ChangeResource] = []
+    for action in actions:
+        resource_id = ":".join(
+            [
+                action.type,
+                action.course_code,
+                action.title,
+                action.due_at.isoformat() if action.due_at is not None else "",
+                action.starts_at.isoformat() if action.starts_at is not None else "",
+            ]
+        )
+        resources.append(
+            model_change_resource(
+                resource_type="pending_action",
+                resource_id=resource_id,
+                title=f"{action.course_code} {action.title}",
+                course_code=action.course_code,
+                model=action,
+            )
+        )
+    return resources
