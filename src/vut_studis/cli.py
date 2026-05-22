@@ -6,7 +6,9 @@ import typer
 from rich.console import Console
 
 from vut_studis.auth import inspect_login_flow, login_with_password
+from vut_studis.cache import CacheStore
 from vut_studis.client import StudisClient
+from vut_studis.config import load_settings
 from vut_studis.errors import StudisError
 
 app = typer.Typer(help="Debug CLI for the standalone VUT Studis client.")
@@ -41,27 +43,67 @@ def grades(
         str | None,
         typer.Option("--course", help="Filter by course code."),
     ] = None,
+    live: Annotated[
+        bool,
+        typer.Option("--live", help="Bypass the local cache and fetch from Studis."),
+    ] = False,
 ) -> None:
     """Fetch grades and points from the electronic index."""
     client = StudisClient()
     grades_result = asyncio.run(
-        client.get_course_grades(course_code) if course_code else client.get_grades()
+        client.get_course_grades(course_code, force_refresh=live)
+        if course_code
+        else client.get_grades(force_refresh=live)
     )
     console.print([grade.model_dump(mode="json") for grade in grades_result])
 
 
 @app.command("course-assessment")
-def course_assessment(course_code: str) -> None:
+def course_assessment(
+    course_code: str,
+    live: Annotated[
+        bool,
+        typer.Option("--live", help="Bypass the local cache and fetch from Studis."),
+    ] = False,
+) -> None:
     """Fetch assessment rules for a single course."""
-    assessment = asyncio.run(StudisClient().get_course_assessment(course_code))
+    assessment = asyncio.run(StudisClient().get_course_assessment(course_code, force_refresh=live))
     console.print(assessment.model_dump(mode="json"))
 
 
 @app.command("course-terms")
-def course_terms(course_code: str) -> None:
+def course_terms(
+    course_code: str,
+    live: Annotated[
+        bool,
+        typer.Option("--live", help="Bypass the local cache and fetch from Studis."),
+    ] = False,
+) -> None:
     """Fetch exam and credit terms for a single course."""
-    terms = asyncio.run(StudisClient().get_course_terms(course_code))
+    terms = asyncio.run(StudisClient().get_course_terms(course_code, force_refresh=live))
     console.print(terms.model_dump(mode="json"))
+
+
+@app.command("cache-status")
+def cache_status() -> None:
+    """Show local cache status."""
+    status = CacheStore.from_settings(load_settings()).status()
+    console.print(
+        {
+            "path": str(status.path),
+            "enabled": status.enabled,
+            "entries": status.entries,
+            "expired_entries": status.expired_entries,
+            "size_bytes": status.size_bytes,
+        }
+    )
+
+
+@app.command("cache-clear")
+def cache_clear() -> None:
+    """Clear all local cache entries."""
+    removed = CacheStore.from_settings(load_settings()).clear()
+    console.print({"removed_entries": removed})
 
 
 @app.command("login-inspect")

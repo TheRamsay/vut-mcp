@@ -1,4 +1,6 @@
-from pydantic import AnyHttpUrl, Field
+from pathlib import Path
+
+from pydantic import AnyHttpUrl, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -8,8 +10,17 @@ class Settings(BaseSettings):
     password: str | None = Field(default=None, alias="VUT_PASSWORD")
     session_cookie: str | None = Field(default=None, alias="VUT_SESSION_COOKIE")
     http_timeout_seconds: float = Field(default=20.0, alias="VUT_HTTP_TIMEOUT_SECONDS")
+    cache_path: Path | None = Field(default=None, alias="VUT_CACHE_PATH")
+    cache_disabled: bool = Field(default=False, alias="VUT_CACHE_DISABLED")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @field_validator("cache_path", mode="before")
+    @classmethod
+    def empty_cache_path_is_default(cls, value: object) -> object:
+        if value == "":
+            return None
+        return value
 
 
 def load_settings() -> Settings:

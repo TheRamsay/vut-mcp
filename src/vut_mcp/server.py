@@ -20,18 +20,21 @@ async def vut_get_student_summary():
 
 
 @mcp.tool()
-async def vut_get_grades(course_code: str | None = None):
+async def vut_get_grades(course_code: str | None = None, force_refresh: bool = False):
     """Get grades and points from the student's VUT Studis electronic index."""
     client = get_studis_client()
     if course_code:
-        return await client.get_course_grades(course_code)
-    return await client.get_grades()
+        return await client.get_course_grades(course_code, force_refresh=force_refresh)
+    return await client.get_grades(force_refresh=force_refresh)
 
 
 @mcp.tool()
-async def vut_get_course_points(course_code: str):
+async def vut_get_course_points(course_code: str, force_refresh: bool = False):
     """Get points for a specific course code from the VUT Studis electronic index."""
-    grades = await get_studis_client().get_course_grades(course_code)
+    grades = await get_studis_client().get_course_grades(
+        course_code,
+        force_refresh=force_refresh,
+    )
     return [
         {
             "course_code": grade.course_code,
@@ -49,15 +52,18 @@ async def vut_get_course_points(course_code: str):
 
 
 @mcp.tool()
-async def vut_get_course_assessment(course_code: str):
+async def vut_get_course_assessment(course_code: str, force_refresh: bool = False):
     """Get assessment rules, minimum points, and maximum points for a VUT course."""
-    return await get_studis_client().get_course_assessment(course_code)
+    return await get_studis_client().get_course_assessment(
+        course_code,
+        force_refresh=force_refresh,
+    )
 
 
 @mcp.tool()
-async def vut_get_course_terms(course_code: str):
+async def vut_get_course_terms(course_code: str, force_refresh: bool = False):
     """Get exam/credit terms, registration status, capacity, and points for a VUT course."""
-    return await get_studis_client().get_course_terms(course_code)
+    return await get_studis_client().get_course_terms(course_code, force_refresh=force_refresh)
 
 
 def main() -> None:

@@ -1,7 +1,17 @@
-from datetime import date
+from collections.abc import Awaitable, Callable
+from datetime import date, timedelta
+from hashlib import sha256
 
 import httpx
+from pydantic import BaseModel
 
+from vut_studis.cache import (
+    CacheStore,
+    decode_model,
+    decode_model_list,
+    encode_model,
+    encode_model_list,
+)
 from vut_studis.config import Settings, load_settings
 from vut_studis.errors import StudisAuthError
 from vut_studis.models import (
@@ -18,11 +28,19 @@ from vut_studis.parsers.grades import parse_grades_html
 from vut_studis.parsers.terms import parse_course_terms_html
 
 ELECTRONIC_INDEX_PATH = "/studis/student.phtml?sn=el_index"
+GRADES_CACHE_TTL = timedelta(minutes=30)
+COURSE_DETAIL_CACHE_TTL = timedelta(minutes=30)
 
 
 class StudisClient:
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        *,
+        cache_store: CacheStore | None = None,
+    ) -> None:
         self.settings = settings or load_settings()
+        self.cache = cache_store or CacheStore.from_settings(self.settings)
 
     def _headers(self) -> dict[str, str]:
         if not self.settings.session_cookie:
@@ -65,12 +83,29 @@ class StudisClient:
     async def get_exams(self) -> list[ExamTerm]:
         raise NotImplementedError("Studis exams endpoint/parser is not implemented yet.")
 
-    async def get_grades(self) -> list[Grade]:
+    async def get_grades(self, *, force_refresh: bool = False) -> list[Grade]:
+        result = await self.cache.get_or_fetch(
+            key=self._cache_key("grades"),
+            resource_type="grades",
+            ttl=GRADES_CACHE_TTL,
+            force_refresh=force_refresh,
+            fetch=self._fetch_grades_live,
+            encode=encode_model_list,
+            decode=lambda payload: decode_model_list(payload, Grade),
+        )
+        return result.value
+
+    async def _fetch_grades_live(self) -> list[Grade]:
         html = await self._get_html(ELECTRONIC_INDEX_PATH)
         return parse_grades_html(html)
 
-    async def get_course_grades(self, course_code: str) -> list[Grade]:
-        grades = await self.get_grades()
+    async def get_course_grades(
+        self,
+        course_code: str,
+        *,
+        force_refresh: bool = False,
+    ) -> list[Grade]:
+        grades = await self.get_grades(force_refresh=force_refresh)
         normalized_code = course_code.casefold()
         return [
             grade
@@ -78,13 +113,64 @@ class StudisClient:
             if grade.course_code is not None and grade.course_code.casefold() == normalized_code
         ]
 
-    async def get_course_assessment(self, course_code: str) -> CourseAssessment:
+    async def get_course_assessment(
+        self,
+        course_code: str,
+        *,
+        force_refresh: bool = False,
+    ) -> CourseAssessment:
+        return await self._get_cached_course_detail(
+            course_code=course_code,
+            resource_type="course_assessment",
+            ttl=COURSE_DETAIL_CACHE_TTL,
+            force_refresh=force_refresh,
+            fetch=lambda: self._fetch_course_assessment_live(course_code),
+            model_type=CourseAssessment,
+        )
+
+    async def _fetch_course_assessment_live(self, course_code: str) -> CourseAssessment:
         response = await self._get_course_detail_response(course_code)
         return parse_course_assessment_html(response.text, base_url=str(response.url))
 
-    async def get_course_terms(self, course_code: str) -> CourseTerms:
+    async def get_course_terms(
+        self,
+        course_code: str,
+        *,
+        force_refresh: bool = False,
+    ) -> CourseTerms:
+        return await self._get_cached_course_detail(
+            course_code=course_code,
+            resource_type="course_terms",
+            ttl=COURSE_DETAIL_CACHE_TTL,
+            force_refresh=force_refresh,
+            fetch=lambda: self._fetch_course_terms_live(course_code),
+            model_type=CourseTerms,
+        )
+
+    async def _fetch_course_terms_live(self, course_code: str) -> CourseTerms:
         response = await self._get_course_detail_response(course_code)
         return parse_course_terms_html(response.text, base_url=str(response.url))
+
+    async def _get_cached_course_detail[M: BaseModel](
+        self,
+        *,
+        course_code: str,
+        resource_type: str,
+        ttl: timedelta,
+        force_refresh: bool,
+        fetch: Callable[[], Awaitable[M]],
+        model_type: type[M],
+    ) -> M:
+        result = await self.cache.get_or_fetch(
+            key=self._cache_key(resource_type, course_code.casefold()),
+            resource_type=resource_type,
+            ttl=ttl,
+            force_refresh=force_refresh,
+            fetch=fetch,
+            encode=encode_model,
+            decode=lambda payload: decode_model(payload, model_type),
+        )
+        return result.value
 
     async def _get_course_detail_response(self, course_code: str) -> httpx.Response:
         html = await self._get_html(ELECTRONIC_INDEX_PATH)
@@ -107,6 +193,15 @@ class StudisClient:
             upcoming_exams=exams[:10],
             latest_grades=grades[:10],
         )
+
+    def _cache_key(self, resource_type: str, *parts: str) -> str:
+        key_parts = ["v1", self._cache_scope(), resource_type, *parts]
+        return ":".join(key_parts)
+
+    def _cache_scope(self) -> str:
+        identity = self.settings.username or self.settings.session_cookie or "anonymous"
+        raw_scope = f"{self.settings.base_url}|{identity}"
+        return sha256(raw_scope.encode("utf-8")).hexdigest()[:16]
 
 
 def _find_course_detail_path(html: str, course_code: str) -> str:
