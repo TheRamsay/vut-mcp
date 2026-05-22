@@ -34,6 +34,18 @@ uv run vut-studis-debug recent-changes
 uv run vut-studis-debug assessment-message FLP --item 2 --entry 1
 ```
 
+## Raycast
+
+The simplest personal-assistant integration is a Raycast Script Command.
+
+1. Open Raycast Settings.
+2. Go to Extensions -> Script Commands.
+3. Add the repository `raycast/` folder as a script directory.
+4. Run `VUT Today` from Raycast.
+
+The command shows pending Studis actions for the next 7 days with severity,
+reason, and suggested next step.
+
 ## Authentication
 
 The current MVP uses the VUT SSO username/password flow to refresh a short-lived
