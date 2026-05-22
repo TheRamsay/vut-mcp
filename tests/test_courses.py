@@ -12,6 +12,8 @@ from vut_studis.models import (
     CourseType,
     Grade,
     PendingAction,
+    PendingActionKind,
+    PendingActionSeverity,
     PendingActionType,
 )
 
@@ -72,8 +74,12 @@ def test_build_student_summary_counts_courses_and_latest_grades() -> None:
         pending_actions=[
             PendingAction(
                 type=PendingActionType.ASSIGNMENT_DEADLINE,
+                severity=PendingActionSeverity.WARNING,
+                action_kind=PendingActionKind.SUBMIT,
                 course_code="ABC",
                 title="Project",
+                reason="Deadline is upcoming.",
+                suggested_next_step="Submit the assignment.",
             )
         ],
     )

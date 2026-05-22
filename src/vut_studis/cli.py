@@ -49,6 +49,10 @@ def pending_actions(
         list[str] | None,
         typer.Option("--course", help="Limit to one or more course codes."),
     ] = None,
+    horizon_days: Annotated[
+        int | None,
+        typer.Option("--horizon-days", help="Only include actions due within this many days."),
+    ] = None,
     live: Annotated[
         bool,
         typer.Option("--live", help="Bypass the local cache and fetch from Studis."),
@@ -58,6 +62,7 @@ def pending_actions(
     actions = asyncio.run(
         StudisClient().get_pending_actions(
             course_codes=course_code,
+            horizon_days=horizon_days,
             force_refresh=live,
         )
     )

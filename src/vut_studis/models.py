@@ -51,14 +51,32 @@ class PendingActionType(StrEnum):
     UNMET_MINIMUM = "unmet_minimum"
 
 
+class PendingActionSeverity(StrEnum):
+    CRITICAL = "critical"
+    WARNING = "warning"
+    INFO = "info"
+
+
+class PendingActionKind(StrEnum):
+    REGISTER = "register"
+    SUBMIT = "submit"
+    ATTEND = "attend"
+    CHECK_POINTS = "check_points"
+
+
 class PendingAction(StudisModel):
     type: PendingActionType
+    severity: PendingActionSeverity
+    action_kind: PendingActionKind
     course_code: str
     course_name: str | None = None
     title: str
+    reason: str
+    suggested_next_step: str
     detail: str | None = None
     due_at: datetime | None = None
     starts_at: datetime | None = None
+    days_left: int | None = None
     registration_opens_at: datetime | None = None
     registration_closes_at: datetime | None = None
     points: float | None = None

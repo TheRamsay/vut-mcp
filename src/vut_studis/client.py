@@ -9,6 +9,7 @@ from vut_studis.aggregates import (
     build_student_summary,
     course_codes_from_grades,
     courses_from_grades,
+    filter_pending_actions_by_horizon,
     find_assessment_message_target,
     pending_action_sort_key,
     pending_actions_from_assessment,
@@ -117,6 +118,7 @@ class StudisClient:
         self,
         *,
         course_codes: list[str] | None = None,
+        horizon_days: int | None = None,
         force_refresh: bool = False,
     ) -> list[PendingAction]:
         if course_codes is None:
@@ -138,6 +140,11 @@ class StudisClient:
             actions.extend(pending_actions_from_assignments(assignments, now=now))
             actions.extend(pending_actions_from_assessment(assessment))
 
+        actions = filter_pending_actions_by_horizon(
+            actions,
+            now=now,
+            horizon_days=horizon_days,
+        )
         return sorted(actions, key=pending_action_sort_key)
 
     async def get_grades(self, *, force_refresh: bool = False) -> list[Grade]:
@@ -366,6 +373,7 @@ class StudisClient:
         course_codes = [course.code for course in courses]
         pending_actions = await self.get_pending_actions(
             course_codes=course_codes,
+            horizon_days=30,
             force_refresh=force_refresh,
         )
 
@@ -380,6 +388,7 @@ class StudisClient:
         courses = courses_from_grades(grades)
         pending_actions = await self.get_pending_actions(
             course_codes=[course.code for course in courses],
+            horizon_days=30,
             force_refresh=force_refresh,
         )
         resources = [

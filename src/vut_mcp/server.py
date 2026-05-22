@@ -22,11 +22,13 @@ async def vut_get_student_summary(force_refresh: bool = False):
 @mcp.tool()
 async def vut_get_pending_actions(
     course_codes: list[str] | None = None,
+    horizon_days: int | None = None,
     force_refresh: bool = False,
 ):
     """Get pending registrations, deadlines, upcoming terms, and unmet point minima."""
     return await get_studis_client().get_pending_actions(
         course_codes=course_codes,
+        horizon_days=horizon_days,
         force_refresh=force_refresh,
     )
 

@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from vut_studis.aggregates import (
+    filter_pending_actions_by_horizon,
     pending_actions_from_assessment,
     pending_actions_from_assignments,
     pending_actions_from_terms,
@@ -12,6 +13,8 @@ from vut_studis.models import (
     CourseAssignments,
     CourseTerm,
     CourseTerms,
+    PendingActionKind,
+    PendingActionSeverity,
     PendingActionType,
 )
 
@@ -54,6 +57,10 @@ def test_pending_actions_from_terms_flags_open_and_unregistered_future_terms() -
     ]
     assert actions[0].course_code == "ABC"
     assert actions[0].due_at == datetime(2026, 5, 31, 23, 59)
+    assert actions[0].severity == PendingActionSeverity.INFO
+    assert actions[0].action_kind == PendingActionKind.REGISTER
+    assert actions[0].days_left == 9
+    assert actions[0].suggested_next_step
 
 
 def test_pending_actions_from_assignments_flags_registration_and_deadline() -> None:
@@ -88,6 +95,9 @@ def test_pending_actions_from_assignments_flags_registration_and_deadline() -> N
     ]
     assert actions[1].submitted is False
     assert actions[1].due_at == datetime(2026, 6, 1, 23, 59)
+    assert actions[1].severity == PendingActionSeverity.INFO
+    assert actions[1].action_kind == PendingActionKind.SUBMIT
+    assert actions[1].days_left == 10
 
 
 def test_pending_actions_from_assessment_flags_unmet_minimum() -> None:
@@ -117,3 +127,44 @@ def test_pending_actions_from_assessment_flags_unmet_minimum() -> None:
     assert actions[0].title == "Project"
     assert actions[0].points == 8
     assert actions[0].min_points == 10
+    assert actions[0].severity == PendingActionSeverity.CRITICAL
+    assert actions[0].action_kind == PendingActionKind.CHECK_POINTS
+
+
+def test_filter_pending_actions_by_horizon_keeps_undated_actions() -> None:
+    actions = pending_actions_from_terms(
+        CourseTerms(
+            course_code="ABC",
+            terms=[
+                CourseTerm(
+                    assessment_name="Exam",
+                    name="Soon",
+                    starts_at=datetime(2026, 5, 25, 9, 0),
+                    registered=False,
+                ),
+                CourseTerm(
+                    assessment_name="Exam",
+                    name="Later",
+                    starts_at=datetime(2026, 6, 25, 9, 0),
+                    registered=False,
+                ),
+            ],
+        ),
+        now=datetime(2026, 5, 22, 12, 0),
+    )
+    actions.extend(
+        pending_actions_from_assessment(
+            CourseAssessment(
+                course_code="ABC",
+                items=[AssessmentItem(name="Minimum", min_points=10, points=4)],
+            )
+        )
+    )
+
+    filtered = filter_pending_actions_by_horizon(
+        actions,
+        now=datetime(2026, 5, 22, 12, 0),
+        horizon_days=7,
+    )
+
+    assert [action.title for action in filtered] == ["Exam: Soon", "Minimum"]

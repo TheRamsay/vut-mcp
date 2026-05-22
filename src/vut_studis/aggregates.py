@@ -10,6 +10,8 @@ from vut_studis.models import (
     CourseTerms,
     Grade,
     PendingAction,
+    PendingActionKind,
+    PendingActionSeverity,
     PendingActionType,
     StudentSummary,
 )
@@ -86,7 +88,12 @@ def pending_actions_from_terms(terms: CourseTerms, *, now: datetime) -> list[Pen
             actions.append(
                 PendingAction(
                     type=PendingActionType.UPCOMING_REGISTERED_TERM,
+                    severity=PendingActionSeverity.INFO,
+                    action_kind=PendingActionKind.ATTEND,
                     title=title,
+                    reason="You are registered for an upcoming assessment term.",
+                    suggested_next_step="Keep the term in mind and prepare for it.",
+                    days_left=_days_until(term.starts_at, now),
                     detail=term.registration_info,
                     due_at=term.starts_at,
                     **base,
@@ -98,7 +105,12 @@ def pending_actions_from_terms(terms: CourseTerms, *, now: datetime) -> list[Pen
             actions.append(
                 PendingAction(
                     type=PendingActionType.OPEN_TERM_REGISTRATION,
+                    severity=_deadline_severity(term.registration_closes_at or term.starts_at, now),
+                    action_kind=PendingActionKind.REGISTER,
                     title=title,
+                    reason="Registration is currently open and you are not registered.",
+                    suggested_next_step="Register for the term if you plan to attend it.",
+                    days_left=_days_until(term.registration_closes_at or term.starts_at, now),
                     detail=term.registration_info,
                     due_at=term.registration_closes_at or term.starts_at,
                     **base,
@@ -110,7 +122,14 @@ def pending_actions_from_terms(terms: CourseTerms, *, now: datetime) -> list[Pen
             actions.append(
                 PendingAction(
                     type=PendingActionType.UNREGISTERED_TERM,
+                    severity=_deadline_severity(term.starts_at, now),
+                    action_kind=PendingActionKind.REGISTER,
                     title=title,
+                    reason="There is an upcoming term where you are not registered.",
+                    suggested_next_step=(
+                        "Check whether registration is available or choose another term."
+                    ),
+                    days_left=_days_until(term.starts_at, now),
                     detail=term.registration_info,
                     due_at=term.starts_at,
                     **base,
@@ -142,7 +161,12 @@ def pending_actions_from_assignments(
             actions.append(
                 PendingAction(
                     type=PendingActionType.OPEN_ASSIGNMENT_REGISTRATION,
+                    severity=_deadline_severity(assignment.registration_closes_at, now),
+                    action_kind=PendingActionKind.REGISTER,
                     title=title,
+                    reason="Assignment registration is open and you are not registered.",
+                    suggested_next_step="Register for the assignment before registration closes.",
+                    days_left=_days_until(assignment.registration_closes_at, now),
                     detail=assignment.registration_info,
                     due_at=assignment.registration_closes_at,
                     **base,
@@ -157,7 +181,12 @@ def pending_actions_from_assignments(
             actions.append(
                 PendingAction(
                     type=PendingActionType.ASSIGNMENT_DEADLINE,
+                    severity=_deadline_severity(assignment.submit_until, now),
+                    action_kind=PendingActionKind.SUBMIT,
                     title=title,
+                    reason="Assignment deadline is upcoming and no submission is recorded.",
+                    suggested_next_step="Prepare and submit the assignment before the deadline.",
+                    days_left=_days_until(assignment.submit_until, now),
                     detail=assignment.description,
                     due_at=assignment.submit_until,
                     **base,
@@ -181,9 +210,13 @@ def pending_actions_from_assessment(assessment: CourseAssessment) -> list[Pendin
         actions.append(
             PendingAction(
                 type=PendingActionType.UNMET_MINIMUM,
+                severity=PendingActionSeverity.CRITICAL,
+                action_kind=PendingActionKind.CHECK_POINTS,
                 course_code=assessment.course_code,
                 course_name=assessment.course_name,
                 title=item.name,
+                reason="The current points are below the required minimum.",
+                suggested_next_step="Check remaining assessment opportunities for this course.",
                 detail=item.category,
                 points=item.points,
                 min_points=item.min_points,
@@ -196,7 +229,12 @@ def pending_actions_from_assessment(assessment: CourseAssessment) -> list[Pendin
 
 
 def pending_action_sort_key(action: PendingAction) -> tuple[int, datetime, str, str]:
-    priority = {
+    severity_priority = {
+        PendingActionSeverity.CRITICAL: 0,
+        PendingActionSeverity.WARNING: 1,
+        PendingActionSeverity.INFO: 2,
+    }[action.severity]
+    type_priority = {
         PendingActionType.OPEN_TERM_REGISTRATION: 0,
         PendingActionType.OPEN_ASSIGNMENT_REGISTRATION: 0,
         PendingActionType.ASSIGNMENT_DEADLINE: 1,
@@ -205,7 +243,45 @@ def pending_action_sort_key(action: PendingAction) -> tuple[int, datetime, str, 
         PendingActionType.UNMET_MINIMUM: 4,
     }[action.type]
     when = action.due_at or action.starts_at or datetime.max
-    return priority, when, action.course_code, action.title
+    return severity_priority, type_priority, when, action.course_code, action.title
+
+
+def filter_pending_actions_by_horizon(
+    actions: list[PendingAction],
+    *,
+    now: datetime,
+    horizon_days: int | None,
+) -> list[PendingAction]:
+    if horizon_days is None:
+        return actions
+
+    horizon = now.date().toordinal() + horizon_days
+    filtered: list[PendingAction] = []
+    for action in actions:
+        relevant_at = action.due_at or action.starts_at
+        if relevant_at is None:
+            filtered.append(action)
+            continue
+        if relevant_at.date().toordinal() <= horizon:
+            filtered.append(action)
+    return filtered
+
+
+def _deadline_severity(deadline: datetime | None, now: datetime) -> PendingActionSeverity:
+    days_left = _days_until(deadline, now)
+    if days_left is None:
+        return PendingActionSeverity.WARNING
+    if days_left <= 2:
+        return PendingActionSeverity.CRITICAL
+    if days_left <= 7:
+        return PendingActionSeverity.WARNING
+    return PendingActionSeverity.INFO
+
+
+def _days_until(deadline: datetime | None, now: datetime) -> int | None:
+    if deadline is None:
+        return None
+    return (deadline.date() - now.date()).days
 
 
 def find_assessment_message_target(
