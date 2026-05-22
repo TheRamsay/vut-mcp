@@ -47,7 +47,8 @@ pnpm dev
 Raycast will open the development extension. Run `VUT Today` from Raycast and
 configure the command preferences if your repository path or `uv` path differs
 from the defaults. The extension also includes `VUT Grades` for total course
-points and awarded grades from the electronic index.
+points and awarded grades from the electronic index, `VUT Changes` for snapshot
+diffs, and `VUT Open Course` for quickly opening a course detail page in Studis.
 
 ## Authentication
 
