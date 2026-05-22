@@ -1,14 +1,23 @@
-from vut_studis.client import _course_codes_from_grades, _course_from_grade
+from datetime import date
+
+from vut_studis.aggregates import (
+    build_student_summary,
+    course_codes_from_grades,
+    course_from_grade,
+)
 from vut_studis.models import (
     CompletionType,
+    Course,
     CourseLanguage,
     CourseType,
     Grade,
+    PendingAction,
+    PendingActionType,
 )
 
 
 def test_course_codes_from_grades_deduplicates_in_order() -> None:
-    codes = _course_codes_from_grades(
+    codes = course_codes_from_grades(
         [
             Grade(course_code="ABC", course_name="First"),
             Grade(course_code="DEF", course_name="Second"),
@@ -21,7 +30,7 @@ def test_course_codes_from_grades_deduplicates_in_order() -> None:
 
 
 def test_course_from_grade_keeps_course_metadata() -> None:
-    course = _course_from_grade(
+    course = course_from_grade(
         Grade(
             course_code="ABC",
             course_name="Test Course",
@@ -48,3 +57,33 @@ def test_course_from_grade_keeps_course_metadata() -> None:
     assert course.completion == CompletionType.EXAM
     assert course.elearning is True
     assert course.absolved is False
+
+
+def test_build_student_summary_counts_courses_and_latest_grades() -> None:
+    summary = build_student_summary(
+        courses=[
+            Course(code="ABC", name="Active", credits=5, absolved=False),
+            Course(code="DEF", name="Done", credits=4, absolved=True),
+        ],
+        grades=[
+            Grade(course_code="ABC", course_name="Active", credit_awarded_on=date(2026, 5, 1)),
+            Grade(course_code="DEF", course_name="Done", grade_awarded_on=date(2026, 5, 20)),
+        ],
+        pending_actions=[
+            PendingAction(
+                type=PendingActionType.ASSIGNMENT_DEADLINE,
+                course_code="ABC",
+                title="Project",
+            )
+        ],
+    )
+
+    assert summary.courses_count == 2
+    assert summary.active_courses_count == 1
+    assert summary.completed_courses_count == 1
+    assert summary.total_credits == 9
+    assert summary.completed_credits == 4
+    assert summary.pending_actions_count == 1
+    assert summary.latest_grades[0].course_code == "DEF"
+    assert summary.upcoming_classes == []
+    assert summary.upcoming_exams == []

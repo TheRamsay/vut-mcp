@@ -14,9 +14,9 @@ async def vut_get_schedule(date_from: date | None = None, date_to: date | None =
 
 
 @mcp.tool()
-async def vut_get_student_summary():
+async def vut_get_student_summary(force_refresh: bool = False):
     """Get a compact summary of the student's current Studis state."""
-    return await get_studis_client().get_student_summary()
+    return await get_studis_client().get_student_summary(force_refresh=force_refresh)
 
 
 @mcp.tool()

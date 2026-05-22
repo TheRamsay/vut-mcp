@@ -1,9 +1,9 @@
 from datetime import datetime
 
-from vut_studis.client import (
-    _pending_actions_from_assessment,
-    _pending_actions_from_assignments,
-    _pending_actions_from_terms,
+from vut_studis.aggregates import (
+    pending_actions_from_assessment,
+    pending_actions_from_assignments,
+    pending_actions_from_terms,
 )
 from vut_studis.models import (
     AssessmentItem,
@@ -17,7 +17,7 @@ from vut_studis.models import (
 
 
 def test_pending_actions_from_terms_flags_open_and_unregistered_future_terms() -> None:
-    actions = _pending_actions_from_terms(
+    actions = pending_actions_from_terms(
         CourseTerms(
             course_code="ABC",
             course_name="Test Course",
@@ -57,7 +57,7 @@ def test_pending_actions_from_terms_flags_open_and_unregistered_future_terms() -
 
 
 def test_pending_actions_from_assignments_flags_registration_and_deadline() -> None:
-    actions = _pending_actions_from_assignments(
+    actions = pending_actions_from_assignments(
         CourseAssignments(
             course_code="ABC",
             course_name="Test Course",
@@ -91,7 +91,7 @@ def test_pending_actions_from_assignments_flags_registration_and_deadline() -> N
 
 
 def test_pending_actions_from_assessment_flags_unmet_minimum() -> None:
-    actions = _pending_actions_from_assessment(
+    actions = pending_actions_from_assessment(
         CourseAssessment(
             course_code="ABC",
             course_name="Test Course",

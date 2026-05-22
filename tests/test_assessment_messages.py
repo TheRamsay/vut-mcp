@@ -1,12 +1,12 @@
 import pytest
 
-from vut_studis.client import _find_assessment_message_target
+from vut_studis.aggregates import find_assessment_message_target
 from vut_studis.errors import StudisParseError
 from vut_studis.models import AssessmentEntry, AssessmentItem, CourseAssessment
 
 
 def test_find_assessment_message_target_uses_requested_entry() -> None:
-    item, entry, url = _find_assessment_message_target(
+    item, entry, url = find_assessment_message_target(
         CourseAssessment(
             course_code="ABC",
             items=[
@@ -32,7 +32,7 @@ def test_find_assessment_message_target_uses_requested_entry() -> None:
 
 def test_find_assessment_message_target_requires_entry_when_ambiguous() -> None:
     with pytest.raises(StudisParseError, match="multiple entry messages"):
-        _find_assessment_message_target(
+        find_assessment_message_target(
             CourseAssessment(
                 course_code="ABC",
                 items=[

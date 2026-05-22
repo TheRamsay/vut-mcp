@@ -17,9 +17,15 @@ ENV_PATH = Path(".env")
 
 
 @app.command()
-def summary() -> None:
+def summary(
+    live: Annotated[
+        bool,
+        typer.Option("--live", help="Bypass the local cache and fetch from Studis."),
+    ] = False,
+) -> None:
     """Fetch a compact student summary."""
-    console.print("Student summary is not implemented yet.")
+    result = asyncio.run(StudisClient().get_student_summary(force_refresh=live))
+    console.print(result.model_dump(mode="json"))
 
 
 @app.command()

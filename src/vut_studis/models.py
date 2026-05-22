@@ -245,6 +245,13 @@ class CourseAssignments(StudisModel):
 
 class StudentSummary(StudisModel):
     courses_count: int
-    upcoming_classes: list[ScheduleItem]
-    upcoming_exams: list[ExamTerm]
+    active_courses_count: int
+    completed_courses_count: int
+    total_credits: float | None = None
+    completed_credits: float | None = None
+    pending_actions_count: int
+    courses: list[Course] = Field(default_factory=list)
+    pending_actions: list[PendingAction] = Field(default_factory=list)
     latest_grades: list[Grade]
+    upcoming_classes: list[ScheduleItem] = Field(default_factory=list)
+    upcoming_exams: list[ExamTerm] = Field(default_factory=list)

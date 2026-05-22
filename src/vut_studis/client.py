@@ -5,6 +5,16 @@ from hashlib import sha256
 import httpx
 from pydantic import BaseModel
 
+from vut_studis.aggregates import (
+    build_student_summary,
+    course_codes_from_grades,
+    courses_from_grades,
+    find_assessment_message_target,
+    pending_action_sort_key,
+    pending_actions_from_assessment,
+    pending_actions_from_assignments,
+    pending_actions_from_terms,
+)
 from vut_studis.cache import (
     CacheStore,
     decode_model,
@@ -13,7 +23,7 @@ from vut_studis.cache import (
     encode_model_list,
 )
 from vut_studis.config import Settings, load_settings
-from vut_studis.errors import StudisAuthError, StudisParseError
+from vut_studis.errors import StudisAuthError
 from vut_studis.models import (
     AssessmentEntry,
     AssessmentItem,
@@ -25,7 +35,6 @@ from vut_studis.models import (
     ExamTerm,
     Grade,
     PendingAction,
-    PendingActionType,
     ScheduleItem,
     StudentSummary,
 )
@@ -86,21 +95,7 @@ class StudisClient:
 
     async def get_courses(self, *, force_refresh: bool = False) -> list[Course]:
         grades = await self.get_grades(force_refresh=force_refresh)
-        courses: list[Course] = []
-        seen: set[str] = set()
-
-        for grade in grades:
-            if grade.course_code is None:
-                continue
-
-            normalized = grade.course_code.casefold()
-            if normalized in seen:
-                continue
-
-            seen.add(normalized)
-            courses.append(_course_from_grade(grade))
-
-        return courses
+        return courses_from_grades(grades)
 
     async def get_schedule(
         self,
@@ -120,7 +115,7 @@ class StudisClient:
     ) -> list[PendingAction]:
         if course_codes is None:
             grades = await self.get_grades(force_refresh=force_refresh)
-            codes = _course_codes_from_grades(grades)
+            codes = course_codes_from_grades(grades)
         else:
             codes = course_codes
         actions: list[PendingAction] = []
@@ -133,11 +128,11 @@ class StudisClient:
                 force_refresh=force_refresh,
             )
             assessment = await self.get_course_assessment(course_code, force_refresh=force_refresh)
-            actions.extend(_pending_actions_from_terms(terms, now=now))
-            actions.extend(_pending_actions_from_assignments(assignments, now=now))
-            actions.extend(_pending_actions_from_assessment(assessment))
+            actions.extend(pending_actions_from_terms(terms, now=now))
+            actions.extend(pending_actions_from_assignments(assignments, now=now))
+            actions.extend(pending_actions_from_assessment(assessment))
 
-        return sorted(actions, key=_pending_action_sort_key)
+        return sorted(actions, key=pending_action_sort_key)
 
     async def get_grades(self, *, force_refresh: bool = False) -> list[Grade]:
         result = await self.cache.get_or_fetch(
@@ -200,7 +195,7 @@ class StudisClient:
             course_code,
             force_refresh=force_refresh,
         )
-        item, entry, message_url = _find_assessment_message_target(
+        item, entry, message_url = find_assessment_message_target(
             assessment,
             item_order,
             entry_order,
@@ -359,17 +354,19 @@ class StudisClient:
             self._ensure_authenticated(response)
             return response
 
-    async def get_student_summary(self) -> StudentSummary:
-        courses = await self.get_courses()
-        schedule = await self.get_schedule()
-        exams = await self.get_exams()
-        grades = await self.get_grades()
+    async def get_student_summary(self, *, force_refresh: bool = False) -> StudentSummary:
+        grades = await self.get_grades(force_refresh=force_refresh)
+        courses = courses_from_grades(grades)
+        course_codes = [course.code for course in courses]
+        pending_actions = await self.get_pending_actions(
+            course_codes=course_codes,
+            force_refresh=force_refresh,
+        )
 
-        return StudentSummary(
-            courses_count=len(courses),
-            upcoming_classes=schedule[:10],
-            upcoming_exams=exams[:10],
-            latest_grades=grades[:10],
+        return build_student_summary(
+            courses=courses,
+            grades=grades,
+            pending_actions=pending_actions,
         )
 
     def _cache_key(self, resource_type: str, *parts: str) -> str:
@@ -407,217 +404,3 @@ def _find_course_detail_path(html: str, course_code: str) -> str:
                 return path + (f"?{parsed.query}" if parsed.query else "")
 
     raise StudisAuthError(f"Assessment detail link for course {course_code!r} was not found.")
-
-
-def _course_codes_from_grades(grades: list[Grade]) -> list[str]:
-    codes: list[str] = []
-    seen: set[str] = set()
-    for grade in grades:
-        if grade.course_code is None:
-            continue
-        normalized = grade.course_code.casefold()
-        if normalized in seen:
-            continue
-        seen.add(normalized)
-        codes.append(grade.course_code)
-    return codes
-
-
-def _course_from_grade(grade: Grade) -> Course:
-    return Course(
-        code=grade.course_code or "",
-        name=grade.course_name,
-        academic_year=grade.academic_year,
-        semester=grade.semester,
-        language=grade.language,
-        course_type=grade.course_type,
-        credits=grade.credits,
-        in_study_plan=grade.in_study_plan,
-        completion=grade.completion,
-        elearning=grade.elearning,
-        absolved=grade.absolved,
-    )
-
-
-def _find_assessment_message_target(
-    assessment: CourseAssessment,
-    item_order: int,
-    entry_order: int | None,
-) -> tuple[AssessmentItem, AssessmentEntry | None, str]:
-    item = next((item for item in assessment.items if item.order == item_order), None)
-    if item is None:
-        raise StudisParseError(
-            f"Assessment item {item_order!r} was not found for course {assessment.course_code!r}."
-        )
-
-    if entry_order is not None:
-        entry = next((entry for entry in item.entries if entry.order == entry_order), None)
-        if entry is None:
-            raise StudisParseError(
-                f"Assessment entry {entry_order!r} was not found for item {item_order!r}."
-            )
-        if entry.message_url is None:
-            raise StudisParseError(
-                f"Assessment entry {entry_order!r} does not have a message link."
-            )
-        return item, entry, entry.message_url
-
-    if item.message_url is not None:
-        return item, None, item.message_url
-
-    entries_with_messages = [entry for entry in item.entries if entry.message_url is not None]
-    if len(entries_with_messages) == 1:
-        entry = entries_with_messages[0]
-        return item, entry, entry.message_url or ""
-
-    if entries_with_messages:
-        raise StudisParseError(
-            f"Assessment item {item_order!r} has multiple entry messages. Provide entry_order."
-        )
-
-    raise StudisParseError(f"Assessment item {item_order!r} does not have a message link.")
-
-
-def _pending_actions_from_terms(terms: CourseTerms, *, now: datetime) -> list[PendingAction]:
-    actions: list[PendingAction] = []
-    for term in terms.terms:
-        if term.starts_at is not None and term.starts_at < now:
-            continue
-
-        base = {
-            "course_code": terms.course_code,
-            "course_name": terms.course_name,
-            "starts_at": term.starts_at,
-            "registration_opens_at": term.registration_opens_at,
-            "registration_closes_at": term.registration_closes_at,
-            "registered": term.registered,
-            "points": term.earned_points,
-            "max_points": term.max_points,
-            "detail_url": term.detail_url,
-        }
-        title = f"{term.assessment_name or 'Termín'}: {term.name}"
-
-        if term.registered is True:
-            actions.append(
-                PendingAction(
-                    type=PendingActionType.UPCOMING_REGISTERED_TERM,
-                    title=title,
-                    detail=term.registration_info,
-                    due_at=term.starts_at,
-                    **base,
-                )
-            )
-            continue
-
-        if term.can_register is True:
-            actions.append(
-                PendingAction(
-                    type=PendingActionType.OPEN_TERM_REGISTRATION,
-                    title=title,
-                    detail=term.registration_info,
-                    due_at=term.registration_closes_at or term.starts_at,
-                    **base,
-                )
-            )
-            continue
-
-        if term.registered is False:
-            actions.append(
-                PendingAction(
-                    type=PendingActionType.UNREGISTERED_TERM,
-                    title=title,
-                    detail=term.registration_info,
-                    due_at=term.starts_at,
-                    **base,
-                )
-            )
-
-    return actions
-
-
-def _pending_actions_from_assignments(
-    assignments: CourseAssignments,
-    *,
-    now: datetime,
-) -> list[PendingAction]:
-    actions: list[PendingAction] = []
-    for assignment in assignments.assignments:
-        base = {
-            "course_code": assignments.course_code,
-            "course_name": assignments.course_name,
-            "registration_opens_at": assignment.registration_opens_at,
-            "registration_closes_at": assignment.registration_closes_at,
-            "registered": assignment.registered,
-            "submitted": assignment.submitted,
-            "detail_url": assignment.detail_url,
-        }
-        title = f"{assignment.assessment_name or 'Zadání'}: {assignment.name}"
-
-        if assignment.can_register is True and assignment.registered is not True:
-            actions.append(
-                PendingAction(
-                    type=PendingActionType.OPEN_ASSIGNMENT_REGISTRATION,
-                    title=title,
-                    detail=assignment.registration_info,
-                    due_at=assignment.registration_closes_at,
-                    **base,
-                )
-            )
-
-        if (
-            assignment.submit_until is not None
-            and assignment.submit_until >= now
-            and assignment.submitted is not True
-        ):
-            actions.append(
-                PendingAction(
-                    type=PendingActionType.ASSIGNMENT_DEADLINE,
-                    title=title,
-                    detail=assignment.description,
-                    due_at=assignment.submit_until,
-                    **base,
-                )
-            )
-
-    return actions
-
-
-def _pending_actions_from_assessment(assessment: CourseAssessment) -> list[PendingAction]:
-    actions: list[PendingAction] = []
-    for item in assessment.items:
-        if item.min_points is None:
-            continue
-
-        has_unmet_points = item.points is not None and item.points < item.min_points
-        marked_unfulfilled = item.fulfilled is False
-        if not has_unmet_points and not marked_unfulfilled:
-            continue
-
-        actions.append(
-            PendingAction(
-                type=PendingActionType.UNMET_MINIMUM,
-                course_code=assessment.course_code,
-                course_name=assessment.course_name,
-                title=item.name,
-                detail=item.category,
-                points=item.points,
-                min_points=item.min_points,
-                max_points=item.max_points,
-                detail_url=item.message_url,
-            )
-        )
-
-    return actions
-
-
-def _pending_action_sort_key(action: PendingAction) -> tuple[int, datetime, str, str]:
-    priority = {
-        PendingActionType.OPEN_TERM_REGISTRATION: 0,
-        PendingActionType.OPEN_ASSIGNMENT_REGISTRATION: 0,
-        PendingActionType.ASSIGNMENT_DEADLINE: 1,
-        PendingActionType.UNREGISTERED_TERM: 2,
-        PendingActionType.UPCOMING_REGISTERED_TERM: 3,
-        PendingActionType.UNMET_MINIMUM: 4,
-    }[action.type]
-    when = action.due_at or action.starts_at or datetime.max
-    return priority, when, action.course_code, action.title
