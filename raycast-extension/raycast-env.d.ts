@@ -36,13 +36,6 @@ declare namespace Preferences {
   /** uv Path - Full path to uv. */
   "uvPath": string
 }
-  /** Preferences accessible in the `vut-open-course` command */
-  export type VutOpenCourse = ExtensionPreferences & {
-  /** Repository Path - Path to the local vut-mcp repository. */
-  "repositoryPath": string,
-  /** uv Path - Full path to uv. */
-  "uvPath": string
-}
 }
 
 declare namespace Arguments {
@@ -52,7 +45,5 @@ declare namespace Arguments {
   export type VutGrades = {}
   /** Arguments passed to the `vut-changes` command */
   export type VutChanges = {}
-  /** Arguments passed to the `vut-open-course` command */
-  export type VutOpenCourse = {}
 }
 

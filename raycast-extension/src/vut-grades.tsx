@@ -24,17 +24,34 @@ type Grade = {
   points?: number;
   exam_term?: number;
   absolved?: boolean;
+  detail_url?: string;
 };
 
 const PYTHON = String.raw`
 import asyncio
 import json
+from urllib.parse import urljoin
 
-from vut_studis.client import StudisClient
+from vut_studis.client import ELECTRONIC_INDEX_PATH, StudisClient, _find_course_detail_path
 
 async def main():
-    grades = await StudisClient().get_grades()
-    print(json.dumps([grade.model_dump(mode="json") for grade in grades], ensure_ascii=False))
+    client = StudisClient()
+    grades = await client.get_grades()
+    html = await client._get_html(ELECTRONIC_INDEX_PATH)
+    payload = []
+    for grade in grades:
+        data = grade.model_dump(mode="json")
+        data["detail_url"] = None
+        if grade.course_code:
+            try:
+                data["detail_url"] = urljoin(
+                    str(client.settings.base_url),
+                    _find_course_detail_path(html, grade.course_code),
+                )
+            except Exception:
+                data["detail_url"] = None
+        payload.append(data)
+    print(json.dumps(payload, ensure_ascii=False))
 
 asyncio.run(main())
 `;
@@ -161,15 +178,31 @@ function GradeItem({
       ]}
       actions={
         <ActionPanel>
-          <Action.CopyToClipboard
-            title="Copy Summary"
-            content={copySummary(grade)}
-          />
-          <Action
-            title="Refresh"
-            icon={Icon.ArrowClockwise}
-            onAction={onRefresh}
-          />
+          <ActionPanel.Section>
+            {grade.detail_url ? (
+              <Action.OpenInBrowser
+                title="Open in Studis"
+                url={grade.detail_url}
+              />
+            ) : null}
+            <Action.CopyToClipboard
+              title="Copy Summary"
+              content={copySummary(grade)}
+            />
+            {grade.course_code ? (
+              <Action.CopyToClipboard
+                title="Copy Course Code"
+                content={grade.course_code}
+              />
+            ) : null}
+          </ActionPanel.Section>
+          <ActionPanel.Section>
+            <Action
+              title="Refresh"
+              icon={Icon.ArrowClockwise}
+              onAction={onRefresh}
+            />
+          </ActionPanel.Section>
         </ActionPanel>
       }
     />
@@ -305,6 +338,7 @@ function copySummary(grade: Grade): string {
       ? `Completion: ${completionLabel(grade.completion)}`
       : undefined,
     grade.semester ? `Semester: ${grade.semester}` : undefined,
+    grade.detail_url ? `Link: ${grade.detail_url}` : undefined,
   ]
     .filter(Boolean)
     .join("\n");
