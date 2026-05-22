@@ -84,6 +84,21 @@ def course_terms(
     console.print(terms.model_dump(mode="json"))
 
 
+@app.command("course-assignments")
+def course_assignments(
+    course_code: str,
+    live: Annotated[
+        bool,
+        typer.Option("--live", help="Bypass the local cache and fetch from Studis."),
+    ] = False,
+) -> None:
+    """Fetch assignments and submitted file status for a single course."""
+    assignments = asyncio.run(
+        StudisClient().get_course_assignments(course_code, force_refresh=live)
+    )
+    console.print(assignments.model_dump(mode="json"))
+
+
 @app.command("cache-status")
 def cache_status() -> None:
     """Show local cache status."""

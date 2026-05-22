@@ -17,6 +17,7 @@ from vut_studis.errors import StudisAuthError
 from vut_studis.models import (
     Course,
     CourseAssessment,
+    CourseAssignments,
     CourseTerms,
     ExamTerm,
     Grade,
@@ -24,6 +25,11 @@ from vut_studis.models import (
     StudentSummary,
 )
 from vut_studis.parsers.assessments import parse_course_assessment_html
+from vut_studis.parsers.assignments import (
+    parse_assignment_detail_html,
+    parse_assignment_submission_html,
+    parse_course_assignments_html,
+)
 from vut_studis.parsers.grades import parse_grades_html
 from vut_studis.parsers.terms import parse_course_terms_html
 
@@ -150,6 +156,63 @@ class StudisClient:
     async def _fetch_course_terms_live(self, course_code: str) -> CourseTerms:
         response = await self._get_course_detail_response(course_code)
         return parse_course_terms_html(response.text, base_url=str(response.url))
+
+    async def get_course_assignments(
+        self,
+        course_code: str,
+        *,
+        force_refresh: bool = False,
+    ) -> CourseAssignments:
+        return await self._get_cached_course_detail(
+            course_code=course_code,
+            resource_type="course_assignments",
+            ttl=COURSE_DETAIL_CACHE_TTL,
+            force_refresh=force_refresh,
+            fetch=lambda: self._fetch_course_assignments_live(course_code),
+            model_type=CourseAssignments,
+        )
+
+    async def _fetch_course_assignments_live(self, course_code: str) -> CourseAssignments:
+        response = await self._get_course_detail_response(course_code)
+        assignments = parse_course_assignments_html(response.text, base_url=str(response.url))
+        enriched = []
+
+        async with self._http_client() as client:
+            for assignment in assignments.assignments:
+                if assignment.detail_url is None:
+                    enriched.append(assignment)
+                    continue
+
+                detail_response = await client.get(assignment.detail_url)
+                detail_response.raise_for_status()
+                self._ensure_authenticated(detail_response)
+                detail = parse_assignment_detail_html(
+                    detail_response.text,
+                    base_url=str(detail_response.url),
+                )
+
+                submitted_files = []
+                submission_url = detail.get("submission_url")
+                if isinstance(submission_url, str):
+                    submission_response = await client.get(submission_url)
+                    submission_response.raise_for_status()
+                    self._ensure_authenticated(submission_response)
+                    submitted_files = parse_assignment_submission_html(
+                        submission_response.text,
+                        base_url=str(submission_response.url),
+                    )
+
+                enriched.append(
+                    assignment.model_copy(
+                        update={
+                            **detail,
+                            "submitted": bool(submitted_files),
+                            "submitted_files": submitted_files,
+                        }
+                    )
+                )
+
+        return assignments.model_copy(update={"assignments": enriched})
 
     async def _get_cached_course_detail[M: BaseModel](
         self,

@@ -151,6 +151,47 @@ class CourseTerms(StudisModel):
     terms: list[CourseTerm]
 
 
+class AssignmentSubmissionFile(StudisModel):
+    name: str
+    size: str | None = None
+    uploaded_at: datetime | None = None
+    uploaded_by: str | None = None
+    download_url: str | None = None
+
+
+class CourseAssignment(StudisModel):
+    assessment_order: int | None = None
+    assessment_name: str | None = None
+    assessment_category: str | None = None
+    assignment_number: int | None = None
+    name: str
+    teacher: str | None = None
+    description: str | None = None
+    submit_until: datetime | None = None
+    registered: bool | None = None
+    registered_at: datetime | None = None
+    auto_registration: bool | None = None
+    capacity_used: int | None = None
+    capacity_total: int | None = None
+    registration_info: str | None = None
+    registration_opens_at: datetime | None = None
+    registration_closes_at: datetime | None = None
+    unregistration_closes_at: datetime | None = None
+    can_register: bool | None = None
+    can_unregister: bool | None = None
+    submitted: bool | None = None
+    submitted_files: list[AssignmentSubmissionFile] = Field(default_factory=list)
+    detail_url: str | None = None
+    submission_url: str | None = None
+
+
+class CourseAssignments(StudisModel):
+    course_code: str
+    course_name: str | None = None
+    academic_year: str | None = None
+    assignments: list[CourseAssignment]
+
+
 class StudentSummary(StudisModel):
     courses_count: int
     upcoming_classes: list[ScheduleItem]

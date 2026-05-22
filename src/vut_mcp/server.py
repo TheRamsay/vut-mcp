@@ -66,5 +66,14 @@ async def vut_get_course_terms(course_code: str, force_refresh: bool = False):
     return await get_studis_client().get_course_terms(course_code, force_refresh=force_refresh)
 
 
+@mcp.tool()
+async def vut_get_course_assignments(course_code: str, force_refresh: bool = False):
+    """Get assignments, registration status, deadlines, and submitted files for a VUT course."""
+    return await get_studis_client().get_course_assignments(
+        course_code,
+        force_refresh=force_refresh,
+    )
+
+
 def main() -> None:
     mcp.run()
