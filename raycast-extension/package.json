@@ -6,6 +6,7 @@
   "icon": "extension-icon.png",
   "author": "ramsay",
   "license": "MIT",
+  "packageManager": "pnpm@10.31.0",
   "commands": [
     {
       "name": "vut-today",
@@ -45,7 +46,7 @@
   },
   "devDependencies": {
     "@raycast/eslint-config": "^2.1.1",
-    "@types/node": "^24.0.0",
+    "@types/node": "22.19.17",
     "eslint": "^9.0.0",
     "prettier": "^3.0.0",
     "typescript": "^5.0.0"

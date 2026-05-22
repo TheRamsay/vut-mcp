@@ -50,8 +50,8 @@ For a native Raycast list UI, use the extension:
 
 ```bash
 cd raycast-extension
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
 Raycast will open the development extension. Configure the command preferences
