@@ -4,8 +4,18 @@ import httpx
 
 from vut_studis.config import Settings, load_settings
 from vut_studis.errors import StudisAuthError
-from vut_studis.models import Course, ExamTerm, Grade, ScheduleItem, StudentSummary
+from vut_studis.models import (
+    Course,
+    CourseAssessment,
+    CourseTerms,
+    ExamTerm,
+    Grade,
+    ScheduleItem,
+    StudentSummary,
+)
+from vut_studis.parsers.assessments import parse_course_assessment_html
 from vut_studis.parsers.grades import parse_grades_html
+from vut_studis.parsers.terms import parse_course_terms_html
 
 ELECTRONIC_INDEX_PATH = "/studis/student.phtml?sn=el_index"
 
@@ -68,6 +78,23 @@ class StudisClient:
             if grade.course_code is not None and grade.course_code.casefold() == normalized_code
         ]
 
+    async def get_course_assessment(self, course_code: str) -> CourseAssessment:
+        response = await self._get_course_detail_response(course_code)
+        return parse_course_assessment_html(response.text, base_url=str(response.url))
+
+    async def get_course_terms(self, course_code: str) -> CourseTerms:
+        response = await self._get_course_detail_response(course_code)
+        return parse_course_terms_html(response.text, base_url=str(response.url))
+
+    async def _get_course_detail_response(self, course_code: str) -> httpx.Response:
+        html = await self._get_html(ELECTRONIC_INDEX_PATH)
+        detail_path = _find_course_detail_path(html, course_code)
+        async with self._http_client() as client:
+            response = await client.get(detail_path)
+            response.raise_for_status()
+            self._ensure_authenticated(response)
+            return response
+
     async def get_student_summary(self) -> StudentSummary:
         courses = await self.get_courses()
         schedule = await self.get_schedule()
@@ -80,3 +107,30 @@ class StudisClient:
             upcoming_exams=exams[:10],
             latest_grades=grades[:10],
         )
+
+
+def _find_course_detail_path(html: str, course_code: str) -> str:
+    from urllib.parse import urlparse
+
+    from selectolax.parser import HTMLParser
+
+    tree = HTMLParser(html)
+    normalized_code = course_code.casefold()
+    for row in tree.css("tr"):
+        cells = row.css("td")
+        if len(cells) != 13:
+            continue
+
+        if cells[0].text(strip=True).casefold() != normalized_code:
+            continue
+
+        for link in row.css("a"):
+            href = link.attributes.get("href") or ""
+            if "sn=predmet_detail" in href:
+                parsed = urlparse(href)
+                path = parsed.path or "/studis/student.phtml"
+                if path == "student.phtml":
+                    path = f"/studis/{path}"
+                return path + (f"?{parsed.query}" if parsed.query else "")
+
+    raise StudisAuthError(f"Assessment detail link for course {course_code!r} was not found.")

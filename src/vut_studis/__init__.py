@@ -1,9 +1,14 @@
 from vut_studis.auth import LoginAttemptResult, refresh_session_cookie
 from vut_studis.client import StudisClient
 from vut_studis.models import (
+    AssessmentEntry,
+    AssessmentItem,
     CompletionType,
     Course,
+    CourseAssessment,
     CourseLanguage,
+    CourseTerm,
+    CourseTerms,
     CourseType,
     ExamTerm,
     Grade,
@@ -13,9 +18,14 @@ from vut_studis.models import (
 )
 
 __all__ = [
+    "AssessmentEntry",
+    "AssessmentItem",
     "CompletionType",
     "Course",
+    "CourseAssessment",
     "CourseLanguage",
+    "CourseTerm",
+    "CourseTerms",
     "CourseType",
     "ExamTerm",
     "Grade",

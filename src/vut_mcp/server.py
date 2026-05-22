@@ -48,5 +48,17 @@ async def vut_get_course_points(course_code: str):
     ]
 
 
+@mcp.tool()
+async def vut_get_course_assessment(course_code: str):
+    """Get assessment rules, minimum points, and maximum points for a VUT course."""
+    return await get_studis_client().get_course_assessment(course_code)
+
+
+@mcp.tool()
+async def vut_get_course_terms(course_code: str):
+    """Get exam/credit terms, registration status, capacity, and points for a VUT course."""
+    return await get_studis_client().get_course_terms(course_code)
+
+
 def main() -> None:
     mcp.run()

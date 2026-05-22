@@ -186,6 +186,27 @@ def _parse_enum[T: str](enum_type: type[T], text: str) -> T | None:
         return None
 
 
+def parse_completion(text: str) -> CompletionType | None:
+    normalized = text.strip().casefold()
+    labels = {
+        "zápočet": CompletionType.CREDIT,
+        "zkouška": CompletionType.EXAM,
+        "zápočet a zkouška": CompletionType.CREDIT_AND_EXAM,
+        "klasifikovaný zápočet": CompletionType.CLASSIFIED_CREDIT,
+        "uznaná zkouška": CompletionType.RECOGNIZED_EXAM,
+        "uznaný klasifikovaný zápočet": CompletionType.RECOGNIZED_CLASSIFIED_CREDIT,
+    }
+    return labels.get(normalized) or _parse_enum(CompletionType, text)
+
+
+def parse_float(text: str) -> float | None:
+    return _parse_float(text)
+
+
+def parse_int(text: str) -> int | None:
+    return _parse_int(text)
+
+
 def _blank_to_none(text: str) -> str | None:
     text = text.strip()
     return text or None

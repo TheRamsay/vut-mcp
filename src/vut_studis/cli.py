@@ -50,6 +50,20 @@ def grades(
     console.print([grade.model_dump(mode="json") for grade in grades_result])
 
 
+@app.command("course-assessment")
+def course_assessment(course_code: str) -> None:
+    """Fetch assessment rules for a single course."""
+    assessment = asyncio.run(StudisClient().get_course_assessment(course_code))
+    console.print(assessment.model_dump(mode="json"))
+
+
+@app.command("course-terms")
+def course_terms(course_code: str) -> None:
+    """Fetch exam and credit terms for a single course."""
+    terms = asyncio.run(StudisClient().get_course_terms(course_code))
+    console.print(terms.model_dump(mode="json"))
+
+
 @app.command("login-inspect")
 def login_inspect() -> None:
     """Inspect the Studis login flow without submitting credentials."""
