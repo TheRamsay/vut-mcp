@@ -1,5 +1,5 @@
 from collections.abc import Awaitable, Callable
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from hashlib import sha256
 
 import httpx
@@ -21,6 +21,8 @@ from vut_studis.models import (
     CourseTerms,
     ExamTerm,
     Grade,
+    PendingAction,
+    PendingActionType,
     ScheduleItem,
     StudentSummary,
 )
@@ -88,6 +90,33 @@ class StudisClient:
 
     async def get_exams(self) -> list[ExamTerm]:
         raise NotImplementedError("Studis exams endpoint/parser is not implemented yet.")
+
+    async def get_pending_actions(
+        self,
+        *,
+        course_codes: list[str] | None = None,
+        force_refresh: bool = False,
+    ) -> list[PendingAction]:
+        if course_codes is None:
+            grades = await self.get_grades(force_refresh=force_refresh)
+            codes = _course_codes_from_grades(grades)
+        else:
+            codes = course_codes
+        actions: list[PendingAction] = []
+        now = datetime.now()
+
+        for course_code in codes:
+            terms = await self.get_course_terms(course_code, force_refresh=force_refresh)
+            assignments = await self.get_course_assignments(
+                course_code,
+                force_refresh=force_refresh,
+            )
+            assessment = await self.get_course_assessment(course_code, force_refresh=force_refresh)
+            actions.extend(_pending_actions_from_terms(terms, now=now))
+            actions.extend(_pending_actions_from_assignments(assignments, now=now))
+            actions.extend(_pending_actions_from_assessment(assessment))
+
+        return sorted(actions, key=_pending_action_sort_key)
 
     async def get_grades(self, *, force_refresh: bool = False) -> list[Grade]:
         result = await self.cache.get_or_fetch(
@@ -292,3 +321,162 @@ def _find_course_detail_path(html: str, course_code: str) -> str:
                 return path + (f"?{parsed.query}" if parsed.query else "")
 
     raise StudisAuthError(f"Assessment detail link for course {course_code!r} was not found.")
+
+
+def _course_codes_from_grades(grades: list[Grade]) -> list[str]:
+    codes: list[str] = []
+    seen: set[str] = set()
+    for grade in grades:
+        if grade.course_code is None:
+            continue
+        normalized = grade.course_code.casefold()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        codes.append(grade.course_code)
+    return codes
+
+
+def _pending_actions_from_terms(terms: CourseTerms, *, now: datetime) -> list[PendingAction]:
+    actions: list[PendingAction] = []
+    for term in terms.terms:
+        if term.starts_at is not None and term.starts_at < now:
+            continue
+
+        base = {
+            "course_code": terms.course_code,
+            "course_name": terms.course_name,
+            "starts_at": term.starts_at,
+            "registration_opens_at": term.registration_opens_at,
+            "registration_closes_at": term.registration_closes_at,
+            "registered": term.registered,
+            "points": term.earned_points,
+            "max_points": term.max_points,
+            "detail_url": term.detail_url,
+        }
+        title = f"{term.assessment_name or 'Termín'}: {term.name}"
+
+        if term.registered is True:
+            actions.append(
+                PendingAction(
+                    type=PendingActionType.UPCOMING_REGISTERED_TERM,
+                    title=title,
+                    detail=term.registration_info,
+                    due_at=term.starts_at,
+                    **base,
+                )
+            )
+            continue
+
+        if term.can_register is True:
+            actions.append(
+                PendingAction(
+                    type=PendingActionType.OPEN_TERM_REGISTRATION,
+                    title=title,
+                    detail=term.registration_info,
+                    due_at=term.registration_closes_at or term.starts_at,
+                    **base,
+                )
+            )
+            continue
+
+        if term.registered is False:
+            actions.append(
+                PendingAction(
+                    type=PendingActionType.UNREGISTERED_TERM,
+                    title=title,
+                    detail=term.registration_info,
+                    due_at=term.starts_at,
+                    **base,
+                )
+            )
+
+    return actions
+
+
+def _pending_actions_from_assignments(
+    assignments: CourseAssignments,
+    *,
+    now: datetime,
+) -> list[PendingAction]:
+    actions: list[PendingAction] = []
+    for assignment in assignments.assignments:
+        base = {
+            "course_code": assignments.course_code,
+            "course_name": assignments.course_name,
+            "registration_opens_at": assignment.registration_opens_at,
+            "registration_closes_at": assignment.registration_closes_at,
+            "registered": assignment.registered,
+            "submitted": assignment.submitted,
+            "detail_url": assignment.detail_url,
+        }
+        title = f"{assignment.assessment_name or 'Zadání'}: {assignment.name}"
+
+        if assignment.can_register is True and assignment.registered is not True:
+            actions.append(
+                PendingAction(
+                    type=PendingActionType.OPEN_ASSIGNMENT_REGISTRATION,
+                    title=title,
+                    detail=assignment.registration_info,
+                    due_at=assignment.registration_closes_at,
+                    **base,
+                )
+            )
+
+        if (
+            assignment.submit_until is not None
+            and assignment.submit_until >= now
+            and assignment.submitted is not True
+        ):
+            actions.append(
+                PendingAction(
+                    type=PendingActionType.ASSIGNMENT_DEADLINE,
+                    title=title,
+                    detail=assignment.description,
+                    due_at=assignment.submit_until,
+                    **base,
+                )
+            )
+
+    return actions
+
+
+def _pending_actions_from_assessment(assessment: CourseAssessment) -> list[PendingAction]:
+    actions: list[PendingAction] = []
+    for item in assessment.items:
+        if item.min_points is None:
+            continue
+
+        has_unmet_points = item.points is not None and item.points < item.min_points
+        marked_unfulfilled = item.fulfilled is False
+        if not has_unmet_points and not marked_unfulfilled:
+            continue
+
+        actions.append(
+            PendingAction(
+                type=PendingActionType.UNMET_MINIMUM,
+                course_code=assessment.course_code,
+                course_name=assessment.course_name,
+                title=item.name,
+                detail=item.category,
+                points=item.points,
+                min_points=item.min_points,
+                max_points=item.max_points,
+                detail_url=item.message_url,
+            )
+        )
+
+    return actions
+
+
+def _pending_action_sort_key(action: PendingAction) -> tuple[int, datetime, str, str]:
+    priority = {
+        PendingActionType.OPEN_TERM_REGISTRATION: 0,
+        PendingActionType.OPEN_ASSIGNMENT_REGISTRATION: 0,
+        PendingActionType.ASSIGNMENT_DEADLINE: 1,
+        PendingActionType.UNREGISTERED_TERM: 2,
+        PendingActionType.UPCOMING_REGISTERED_TERM: 3,
+        PendingActionType.UNMET_MINIMUM: 4,
+    }[action.type]
+    when = action.due_at or action.starts_at or datetime.max
+    return priority, when, action.course_code, action.title

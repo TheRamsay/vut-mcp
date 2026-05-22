@@ -28,6 +28,7 @@ Use the debug CLI without going through MCP:
 ```bash
 uv run vut-studis-debug summary
 uv run vut-studis-debug schedule
+uv run vut-studis-debug pending-actions --course FLP
 ```
 
 ## Authentication

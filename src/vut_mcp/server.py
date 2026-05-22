@@ -20,6 +20,18 @@ async def vut_get_student_summary():
 
 
 @mcp.tool()
+async def vut_get_pending_actions(
+    course_codes: list[str] | None = None,
+    force_refresh: bool = False,
+):
+    """Get pending registrations, deadlines, upcoming terms, and unmet point minima."""
+    return await get_studis_client().get_pending_actions(
+        course_codes=course_codes,
+        force_refresh=force_refresh,
+    )
+
+
+@mcp.tool()
 async def vut_get_grades(course_code: str | None = None, force_refresh: bool = False):
     """Get grades and points from the student's VUT Studis electronic index."""
     client = get_studis_client()

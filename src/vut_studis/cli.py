@@ -37,6 +37,27 @@ def schedule(
     )
 
 
+@app.command("pending-actions")
+def pending_actions(
+    course_code: Annotated[
+        list[str] | None,
+        typer.Option("--course", help="Limit to one or more course codes."),
+    ] = None,
+    live: Annotated[
+        bool,
+        typer.Option("--live", help="Bypass the local cache and fetch from Studis."),
+    ] = False,
+) -> None:
+    """Fetch actionable registration, deadline, and minimum-point warnings."""
+    actions = asyncio.run(
+        StudisClient().get_pending_actions(
+            course_codes=course_code,
+            force_refresh=live,
+        )
+    )
+    console.print([action.model_dump(mode="json") for action in actions])
+
+
 @app.command()
 def grades(
     course_code: Annotated[

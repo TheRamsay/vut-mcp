@@ -33,6 +33,33 @@ class ExamTerm(StudisModel):
     registered: bool | None = None
 
 
+class PendingActionType(StrEnum):
+    OPEN_TERM_REGISTRATION = "open_term_registration"
+    UNREGISTERED_TERM = "unregistered_term"
+    UPCOMING_REGISTERED_TERM = "upcoming_registered_term"
+    OPEN_ASSIGNMENT_REGISTRATION = "open_assignment_registration"
+    ASSIGNMENT_DEADLINE = "assignment_deadline"
+    UNMET_MINIMUM = "unmet_minimum"
+
+
+class PendingAction(StudisModel):
+    type: PendingActionType
+    course_code: str
+    course_name: str | None = None
+    title: str
+    detail: str | None = None
+    due_at: datetime | None = None
+    starts_at: datetime | None = None
+    registration_opens_at: datetime | None = None
+    registration_closes_at: datetime | None = None
+    points: float | None = None
+    min_points: float | None = None
+    max_points: float | None = None
+    registered: bool | None = None
+    submitted: bool | None = None
+    detail_url: str | None = None
+
+
 class CourseLanguage(StrEnum):
     CZECH = "cs"
     ENGLISH = "en"

@@ -16,6 +16,8 @@ from vut_studis.models import (
     ExamTerm,
     Grade,
     GradeValue,
+    PendingAction,
+    PendingActionType,
     ScheduleItem,
     StudentSummary,
 )
@@ -37,6 +39,8 @@ __all__ = [
     "Grade",
     "GradeValue",
     "LoginAttemptResult",
+    "PendingAction",
+    "PendingActionType",
     "ScheduleItem",
     "StudentSummary",
     "StudisClient",
