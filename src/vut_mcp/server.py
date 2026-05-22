@@ -19,5 +19,34 @@ async def vut_get_student_summary():
     return await get_studis_client().get_student_summary()
 
 
+@mcp.tool()
+async def vut_get_grades(course_code: str | None = None):
+    """Get grades and points from the student's VUT Studis electronic index."""
+    client = get_studis_client()
+    if course_code:
+        return await client.get_course_grades(course_code)
+    return await client.get_grades()
+
+
+@mcp.tool()
+async def vut_get_course_points(course_code: str):
+    """Get points for a specific course code from the VUT Studis electronic index."""
+    grades = await get_studis_client().get_course_grades(course_code)
+    return [
+        {
+            "course_code": grade.course_code,
+            "course_name": grade.course_name,
+            "points": grade.points,
+            "grade": grade.grade,
+            "grade_awarded_on": grade.grade_awarded_on,
+            "credit_awarded": grade.credit_awarded,
+            "credit_awarded_on": grade.credit_awarded_on,
+            "academic_year": grade.academic_year,
+            "semester": grade.semester,
+        }
+        for grade in grades
+    ]
+
+
 def main() -> None:
     mcp.run()

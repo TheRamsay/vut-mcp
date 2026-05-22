@@ -6,6 +6,7 @@ import typer
 from rich.console import Console
 
 from vut_studis.auth import inspect_login_flow, login_with_password
+from vut_studis.client import StudisClient
 from vut_studis.errors import StudisError
 
 app = typer.Typer(help="Debug CLI for the standalone VUT Studis client.")
@@ -32,6 +33,21 @@ def schedule(
             "date_to": date_to,
         }
     )
+
+
+@app.command()
+def grades(
+    course_code: Annotated[
+        str | None,
+        typer.Option("--course", help="Filter by course code."),
+    ] = None,
+) -> None:
+    """Fetch grades and points from the electronic index."""
+    client = StudisClient()
+    grades_result = asyncio.run(
+        client.get_course_grades(course_code) if course_code else client.get_grades()
+    )
+    console.print([grade.model_dump(mode="json") for grade in grades_result])
 
 
 @app.command("login-inspect")

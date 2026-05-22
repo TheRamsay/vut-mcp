@@ -5,6 +5,9 @@ import httpx
 from vut_studis.config import Settings, load_settings
 from vut_studis.errors import StudisAuthError
 from vut_studis.models import Course, ExamTerm, Grade, ScheduleItem, StudentSummary
+from vut_studis.parsers.grades import parse_grades_html
+
+ELECTRONIC_INDEX_PATH = "/studis/student.phtml?sn=el_index"
 
 
 class StudisClient:
@@ -25,6 +28,20 @@ class StudisClient:
             headers=self._headers(),
         )
 
+    async def _get_html(self, path: str) -> str:
+        async with self._http_client() as client:
+            response = await client.get(path)
+            response.raise_for_status()
+            self._ensure_authenticated(response)
+            return response.text
+
+    def _ensure_authenticated(self, response: httpx.Response) -> None:
+        title_start = response.text[:2000].lower()
+        if "jednotné přihlášení vut" in title_start or "auth/common" in str(response.url):
+            raise StudisAuthError(
+                "Studis session expired. Run `uv run vut-studis-debug login-refresh-session`."
+            )
+
     async def get_courses(self) -> list[Course]:
         raise NotImplementedError("Studis courses endpoint/parser is not implemented yet.")
 
@@ -39,7 +56,17 @@ class StudisClient:
         raise NotImplementedError("Studis exams endpoint/parser is not implemented yet.")
 
     async def get_grades(self) -> list[Grade]:
-        raise NotImplementedError("Studis grades endpoint/parser is not implemented yet.")
+        html = await self._get_html(ELECTRONIC_INDEX_PATH)
+        return parse_grades_html(html)
+
+    async def get_course_grades(self, course_code: str) -> list[Grade]:
+        grades = await self.get_grades()
+        normalized_code = course_code.casefold()
+        return [
+            grade
+            for grade in grades
+            if grade.course_code is not None and grade.course_code.casefold() == normalized_code
+        ]
 
     async def get_student_summary(self) -> StudentSummary:
         courses = await self.get_courses()
