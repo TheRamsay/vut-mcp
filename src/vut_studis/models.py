@@ -120,6 +120,21 @@ class AssessmentEntry(StudisModel):
     message_url: str | None = None
 
 
+class AssessmentMessage(StudisModel):
+    course_code: str
+    course_name: str | None = None
+    item_order: int | None = None
+    item_name: str | None = None
+    entry_order: int | None = None
+    entry_name: str | None = None
+    title: str | None = None
+    subject: str | None = None
+    sender: str | None = None
+    sent_at: datetime | None = None
+    body: str
+    url: str
+
+
 class AssessmentItem(StudisModel):
     order: int | None = None
     name: str

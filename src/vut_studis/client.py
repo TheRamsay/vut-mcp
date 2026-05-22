@@ -13,8 +13,11 @@ from vut_studis.cache import (
     encode_model_list,
 )
 from vut_studis.config import Settings, load_settings
-from vut_studis.errors import StudisAuthError
+from vut_studis.errors import StudisAuthError, StudisParseError
 from vut_studis.models import (
+    AssessmentEntry,
+    AssessmentItem,
+    AssessmentMessage,
     Course,
     CourseAssessment,
     CourseAssignments,
@@ -26,7 +29,10 @@ from vut_studis.models import (
     ScheduleItem,
     StudentSummary,
 )
-from vut_studis.parsers.assessments import parse_course_assessment_html
+from vut_studis.parsers.assessments import (
+    parse_assessment_message_html,
+    parse_course_assessment_html,
+)
 from vut_studis.parsers.assignments import (
     parse_assignment_detail_html,
     parse_assignment_submission_html,
@@ -166,6 +172,71 @@ class StudisClient:
     async def _fetch_course_assessment_live(self, course_code: str) -> CourseAssessment:
         response = await self._get_course_detail_response(course_code)
         return parse_course_assessment_html(response.text, base_url=str(response.url))
+
+    async def get_assessment_message(
+        self,
+        course_code: str,
+        item_order: int,
+        entry_order: int | None = None,
+        *,
+        force_refresh: bool = False,
+    ) -> AssessmentMessage:
+        assessment = await self.get_course_assessment(
+            course_code,
+            force_refresh=force_refresh,
+        )
+        item, entry, message_url = _find_assessment_message_target(
+            assessment,
+            item_order,
+            entry_order,
+        )
+        url_hash = sha256(message_url.encode("utf-8")).hexdigest()[:16]
+
+        result = await self.cache.get_or_fetch(
+            key=self._cache_key(
+                "assessment_message",
+                course_code.casefold(),
+                str(item_order),
+                str(entry_order or ""),
+                url_hash,
+            ),
+            resource_type="assessment_message",
+            ttl=COURSE_DETAIL_CACHE_TTL,
+            force_refresh=force_refresh,
+            fetch=lambda: self._fetch_assessment_message_live(
+                url=message_url,
+                assessment=assessment,
+                item=item,
+                entry=entry,
+            ),
+            encode=encode_model,
+            decode=lambda payload: decode_model(payload, AssessmentMessage),
+        )
+        return result.value
+
+    async def _fetch_assessment_message_live(
+        self,
+        *,
+        url: str,
+        assessment: CourseAssessment,
+        item: AssessmentItem,
+        entry: AssessmentEntry | None,
+    ) -> AssessmentMessage:
+        async with self._http_client() as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            self._ensure_authenticated(response)
+
+        return parse_assessment_message_html(
+            response.text,
+            url=str(response.url),
+            course_code=assessment.course_code,
+            course_name=assessment.course_name,
+            item_order=item.order,
+            item_name=item.name,
+            entry_order=entry.order if entry is not None else None,
+            entry_name=entry.name if entry is not None else None,
+        )
 
     async def get_course_terms(
         self,
@@ -335,6 +406,45 @@ def _course_codes_from_grades(grades: list[Grade]) -> list[str]:
         seen.add(normalized)
         codes.append(grade.course_code)
     return codes
+
+
+def _find_assessment_message_target(
+    assessment: CourseAssessment,
+    item_order: int,
+    entry_order: int | None,
+) -> tuple[AssessmentItem, AssessmentEntry | None, str]:
+    item = next((item for item in assessment.items if item.order == item_order), None)
+    if item is None:
+        raise StudisParseError(
+            f"Assessment item {item_order!r} was not found for course {assessment.course_code!r}."
+        )
+
+    if entry_order is not None:
+        entry = next((entry for entry in item.entries if entry.order == entry_order), None)
+        if entry is None:
+            raise StudisParseError(
+                f"Assessment entry {entry_order!r} was not found for item {item_order!r}."
+            )
+        if entry.message_url is None:
+            raise StudisParseError(
+                f"Assessment entry {entry_order!r} does not have a message link."
+            )
+        return item, entry, entry.message_url
+
+    if item.message_url is not None:
+        return item, None, item.message_url
+
+    entries_with_messages = [entry for entry in item.entries if entry.message_url is not None]
+    if len(entries_with_messages) == 1:
+        entry = entries_with_messages[0]
+        return item, entry, entry.message_url or ""
+
+    if entries_with_messages:
+        raise StudisParseError(
+            f"Assessment item {item_order!r} has multiple entry messages. Provide entry_order."
+        )
+
+    raise StudisParseError(f"Assessment item {item_order!r} does not have a message link.")
 
 
 def _pending_actions_from_terms(terms: CourseTerms, *, now: datetime) -> list[PendingAction]:

@@ -3,6 +3,7 @@ from vut_studis.client import StudisClient
 from vut_studis.models import (
     AssessmentEntry,
     AssessmentItem,
+    AssessmentMessage,
     AssignmentSubmissionFile,
     CompletionType,
     Course,
@@ -26,6 +27,7 @@ __all__ = [
     "AssignmentSubmissionFile",
     "AssessmentEntry",
     "AssessmentItem",
+    "AssessmentMessage",
     "CompletionType",
     "Course",
     "CourseAssessment",

@@ -92,6 +92,31 @@ def course_assessment(
     console.print(assessment.model_dump(mode="json"))
 
 
+@app.command("assessment-message")
+def assessment_message(
+    course_code: str,
+    item_order: Annotated[int, typer.Option("--item", help="Assessment item order.")],
+    entry_order: Annotated[
+        int | None,
+        typer.Option("--entry", help="Assessment entry order, when the message is on a sub-row."),
+    ] = None,
+    live: Annotated[
+        bool,
+        typer.Option("--live", help="Bypass the local cache and fetch from Studis."),
+    ] = False,
+) -> None:
+    """Fetch a teacher note/message attached to an assessment row."""
+    message = asyncio.run(
+        StudisClient().get_assessment_message(
+            course_code,
+            item_order,
+            entry_order,
+            force_refresh=live,
+        )
+    )
+    console.print(message.model_dump(mode="json"))
+
+
 @app.command("course-terms")
 def course_terms(
     course_code: str,

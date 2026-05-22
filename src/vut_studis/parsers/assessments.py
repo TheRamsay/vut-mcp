@@ -1,10 +1,16 @@
 import re
-from datetime import date
+from datetime import date, datetime
 from urllib.parse import urljoin
 
 from selectolax.parser import HTMLParser, Node
 
-from vut_studis.models import AssessmentEntry, AssessmentItem, CompletionType, CourseAssessment
+from vut_studis.models import (
+    AssessmentEntry,
+    AssessmentItem,
+    AssessmentMessage,
+    CompletionType,
+    CourseAssessment,
+)
 from vut_studis.parsers.grades import parse_completion, parse_float, parse_int
 
 ASSESSMENT_HEADERS = {
@@ -33,6 +39,37 @@ def parse_course_assessment_html(html: str, base_url: str = "") -> CourseAssessm
         credits=parse_float(_parse_label_value(tree, "Počet kreditů:") or ""),
         completion=_parse_completion(tree),
         items=_parse_assessment_items(tree, base_url=base_url),
+    )
+
+
+def parse_assessment_message_html(
+    html: str,
+    *,
+    url: str,
+    course_code: str,
+    course_name: str | None = None,
+    item_order: int | None = None,
+    item_name: str | None = None,
+    entry_order: int | None = None,
+    entry_name: str | None = None,
+) -> AssessmentMessage:
+    tree = HTMLParser(html)
+    labels = _parse_message_labels(tree)
+    body = _parse_message_body(tree, labels)
+
+    return AssessmentMessage(
+        course_code=course_code,
+        course_name=course_name,
+        item_order=item_order,
+        item_name=item_name,
+        entry_order=entry_order,
+        entry_name=entry_name,
+        title=_parse_message_title(tree),
+        subject=_first_label(labels, "Předmět", "Subject", "Název"),
+        sender=_first_label(labels, "Od", "Odesílatel", "Autor", "From"),
+        sent_at=_parse_message_datetime(_first_label(labels, "Datum", "Odesláno", "Vloženo")),
+        body=body,
+        url=url,
     )
 
 
@@ -184,6 +221,90 @@ def _parse_date(text: str) -> date | None:
     return date(int(year), int(month), int(day))
 
 
+def _parse_message_title(tree: HTMLParser) -> str | None:
+    for selector in ("h1", "h2", "h3", "title"):
+        node = tree.css_first(selector)
+        if node is None:
+            continue
+        title = _clean_text(node)
+        if title:
+            return title
+    return None
+
+
+def _parse_message_labels(tree: HTMLParser) -> dict[str, str]:
+    labels: dict[str, str] = {}
+
+    for row in tree.css("tr"):
+        headers = row.css("th")
+        cells = row.css("td")
+        if len(headers) != 1 or len(cells) != 1:
+            continue
+
+        label = _clean_label(headers[0])
+        value = _clean_text(cells[0])
+        if label and value:
+            labels[label] = value
+
+    for row in tree.css("dl"):
+        labels_by_term = row.css("dt")
+        values = row.css("dd")
+        for term, value_node in zip(labels_by_term, values, strict=False):
+            label = _clean_label(term)
+            value = _clean_text(value_node)
+            if label and value:
+                labels[label] = value
+
+    return labels
+
+
+def _parse_message_body(tree: HTMLParser, labels: dict[str, str]) -> str:
+    for label in ("Zpráva", "Text zprávy", "Text", "Message", "Poznámka"):
+        value = labels.get(label)
+        if value:
+            return value
+
+    for selector in ("#obsah", ".obsah", ".zprava", ".message", "article"):
+        node = tree.css_first(selector)
+        if node is None:
+            continue
+        text = _clean_text(node)
+        if text:
+            return text
+
+    return _clean_text(tree.body) if tree.body is not None else _clean_text(tree.root)
+
+
+def _first_label(labels: dict[str, str], *names: str) -> str | None:
+    for name in names:
+        value = labels.get(name)
+        if value:
+            return value
+    return None
+
+
+def _parse_message_datetime(text: str | None) -> datetime | None:
+    if text is None:
+        return None
+
+    match = re.search(
+        r"(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?",
+        text,
+    )
+    if not match:
+        return None
+
+    day, month, year, hour, minute, second = match.groups()
+    return datetime(
+        int(year),
+        int(month),
+        int(day),
+        int(hour or 0),
+        int(minute or 0),
+        int(second or 0),
+    )
+
+
 def _parse_message_url(row: Node, base_url: str) -> str | None:
     for link in row.css("a"):
         href = link.attributes.get("href") or ""
@@ -195,3 +316,7 @@ def _parse_message_url(row: Node, base_url: str) -> str | None:
 
 def _clean_text(node: Node) -> str:
     return re.sub(r"\s+", " ", node.text(strip=True)).strip()
+
+
+def _clean_label(node: Node) -> str:
+    return _clean_text(node).rstrip(":").strip()
