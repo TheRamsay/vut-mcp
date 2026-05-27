@@ -21,6 +21,7 @@ export async function runStudisPython<T>(
     {
       cwd: preferences.repositoryPath,
       maxBuffer: 1024 * 1024 * 10,
+      timeout: 60_000,
     },
   );
 

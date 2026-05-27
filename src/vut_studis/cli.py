@@ -73,9 +73,21 @@ def recent_changes(
         bool,
         typer.Option("--live/--cached", help="Fetch live data before comparing snapshots."),
     ] = True,
+    include_pending_actions: Annotated[
+        bool,
+        typer.Option(
+            "--pending-actions/--no-pending-actions",
+            help="Include slower per-course pending action snapshots.",
+        ),
+    ] = True,
 ) -> None:
     """Detect changes since the previous local Studis snapshot."""
-    result = asyncio.run(StudisClient().get_recent_changes(force_refresh=live))
+    result = asyncio.run(
+        StudisClient().get_recent_changes(
+            force_refresh=live,
+            include_pending_actions=include_pending_actions,
+        )
+    )
     console.print(result.model_dump(mode="json"))
 
 

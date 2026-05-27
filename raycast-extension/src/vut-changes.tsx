@@ -28,7 +28,10 @@ import json
 from vut_studis.client import StudisClient
 
 async def main():
-    changes = await StudisClient().get_recent_changes(force_refresh=True)
+    changes = await StudisClient().get_recent_changes(
+        force_refresh=True,
+        include_pending_actions=False,
+    )
     print(json.dumps(changes.model_dump(mode="json"), ensure_ascii=False))
 
 asyncio.run(main())

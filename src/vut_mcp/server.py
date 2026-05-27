@@ -35,9 +35,15 @@ async def vut_get_pending_actions(
 
 
 @mcp.tool()
-async def vut_get_recent_changes(force_refresh: bool = True):
+async def vut_get_recent_changes(
+    force_refresh: bool = True,
+    include_pending_actions: bool = True,
+):
     """Detect what changed in Studis since the previous snapshot."""
-    return await get_studis_client().get_recent_changes(force_refresh=force_refresh)
+    return await get_studis_client().get_recent_changes(
+        force_refresh=force_refresh,
+        include_pending_actions=include_pending_actions,
+    )
 
 
 @mcp.tool()

@@ -92,7 +92,8 @@ Commands:
 - `VUT Today`: pending actions grouped by severity.
 - `VUT Grades`: points, grades, credits, completion status, and `Open in Studis`
   for course detail pages.
-- `VUT Changes`: snapshot diff since the previous check.
+- `VUT Changes`: fast snapshot diff for courses and grades/points since the
+  previous check.
 
 Each command has preferences for repository path and `uv` path. Defaults are set
 for this local checkout.
@@ -105,6 +106,7 @@ Use the CLI to inspect data without MCP or Raycast:
 uv run vut-studis-debug summary
 uv run vut-studis-debug pending-actions --horizon-days 14
 uv run vut-studis-debug recent-changes
+uv run vut-studis-debug recent-changes --no-pending-actions
 uv run vut-studis-debug grades
 uv run vut-studis-debug course-assessment FLP
 uv run vut-studis-debug course-terms FLP

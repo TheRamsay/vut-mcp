@@ -374,24 +374,34 @@ class StudisClient:
             pending_actions=pending_actions,
         )
 
-    async def get_recent_changes(self, *, force_refresh: bool = True) -> RecentChanges:
+    async def get_recent_changes(
+        self,
+        *,
+        force_refresh: bool = True,
+        include_pending_actions: bool = True,
+    ) -> RecentChanges:
         grades = await self.get_grades(force_refresh=force_refresh)
         courses = courses_from_grades(grades)
-        pending_actions = await self.get_pending_actions(
-            course_codes=[course.code for course in courses],
-            horizon_days=30,
-            force_refresh=force_refresh,
-        )
         resources = [
             *_course_change_resources(courses),
             *_grade_change_resources(grades),
-            *_pending_action_change_resources(pending_actions),
         ]
+        resource_types = ["course", "grade"]
+
+        if include_pending_actions:
+            pending_actions = await self.get_pending_actions(
+                course_codes=[course.code for course in courses],
+                horizon_days=30,
+                force_refresh=force_refresh,
+            )
+            resources.extend(_pending_action_change_resources(pending_actions))
+            resource_types.append("pending_action")
+
         return detect_and_record_changes(
             cache=self.cache,
             scope=self._cache_scope(),
             resources=resources,
-            resource_types=["course", "grade", "pending_action"],
+            resource_types=resource_types,
         )
 
     def _cache_key(self, resource_type: str, *parts: str) -> str:
