@@ -26,7 +26,7 @@ def _settings(session_cookie: str | None = "expired=session") -> Settings:
 @pytest.mark.asyncio
 @respx.mock
 async def test_get_html_refreshes_expired_session_and_retries(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("vut_studis.client.ENV_PATH", tmp_path / ".env")
+    monkeypatch.setattr("vut_studis.transport.ENV_PATH", tmp_path / ".env")
     captured_password_payload: dict[str, list[str]] = {}
 
     respx.get("https://www.vut.cz/studis/student.phtml?sn=el_index").mock(

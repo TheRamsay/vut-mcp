@@ -4,6 +4,12 @@ from datetime import date
 from selectolax.parser import HTMLParser, Node
 
 from vut_studis.models import CompletionType, CourseLanguage, CourseType, Grade, GradeValue
+from vut_studis.parsers.common import (
+    blank_to_none,
+    clean_text,
+    parse_float,
+    parse_int,
+)
 
 GRADE_TABLE_HEADERS = {
     "Zkr.",
@@ -29,7 +35,7 @@ def parse_grades_html(html: str) -> list[Grade]:
     semester: str | None = None
 
     for node in tree.css("h2, h3, table"):
-        text = _clean_text(node)
+        text = clean_text(node)
         if node.tag == "h2":
             academic_year = _parse_academic_year(text) or academic_year
             continue
@@ -50,7 +56,7 @@ def parse_grades_html(html: str) -> list[Grade]:
 
 
 def _is_grade_table(table: Node) -> bool:
-    headers = {_clean_text(header) for header in table.css("th")}
+    headers = {clean_text(header) for header in table.css("th")}
     return GRADE_TABLE_HEADERS.issubset(headers)
 
 
@@ -63,7 +69,7 @@ def _parse_grade_table(
     grades: list[Grade] = []
 
     for row in table.css("tr"):
-        cells = [_clean_text(cell) for cell in row.css("td")]
+        cells = [clean_text(cell) for cell in row.css("td")]
         if len(cells) != 13:
             continue
 
@@ -71,20 +77,20 @@ def _parse_grade_table(
         grade, grade_awarded_on = _parse_grade(cells[10])
         grades.append(
             Grade(
-                course_code=_blank_to_none(cells[0]),
+                course_code=blank_to_none(cells[0]),
                 course_name=cells[1],
                 language=_parse_enum(CourseLanguage, cells[2]),
                 course_type=_parse_enum(CourseType, cells[3]),
-                credits=_parse_float(cells[4]),
+                credits=parse_float(cells[4]),
                 in_study_plan=_parse_bool(cells[5]),
                 completion=_parse_enum(CompletionType, cells[6]),
                 elearning=_parse_bool(cells[7]),
                 credit_awarded=credit_awarded,
                 credit_awarded_on=credit_awarded_on,
-                points=_parse_float(cells[9]),
+                points=parse_float(cells[9]),
                 grade=grade,
                 grade_awarded_on=grade_awarded_on,
-                exam_term=_parse_int(cells[11]),
+                exam_term=parse_int(cells[11]),
                 absolved=_parse_bool(cells[12]),
                 academic_year=academic_year,
                 semester=semester,
@@ -92,10 +98,6 @@ def _parse_grade_table(
         )
 
     return grades
-
-
-def _clean_text(node: Node) -> str:
-    return re.sub(r"\s+", " ", node.text(strip=True)).strip()
 
 
 def _parse_academic_year(text: str) -> str | None:
@@ -113,31 +115,8 @@ def _parse_semester(text: str) -> str | None:
     return None
 
 
-def _parse_float(text: str) -> float | None:
-    value = _blank_to_none(text)
-    if value is None:
-        return None
-
-    value = value.replace(",", ".")
-    try:
-        return float(value)
-    except ValueError:
-        return None
-
-
-def _parse_int(text: str) -> int | None:
-    value = _blank_to_none(text)
-    if value is None:
-        return None
-
-    try:
-        return int(value)
-    except ValueError:
-        return None
-
-
 def _parse_bool(text: str) -> bool | None:
-    value = _blank_to_none(text)
+    value = blank_to_none(text)
     if value is None:
         return None
 
@@ -150,7 +129,7 @@ def _parse_bool(text: str) -> bool | None:
 
 
 def _parse_grade(text: str) -> tuple[GradeValue | None, date | None]:
-    value = _blank_to_none(text)
+    value = blank_to_none(text)
     if value is None:
         return None, None
 
@@ -163,7 +142,7 @@ def _parse_grade(text: str) -> tuple[GradeValue | None, date | None]:
 
 
 def _parse_status_date(text: str) -> tuple[bool | None, date | None]:
-    value = _blank_to_none(text)
+    value = blank_to_none(text)
     if value is None:
         return None, None
 
@@ -176,7 +155,7 @@ def _parse_status_date(text: str) -> tuple[bool | None, date | None]:
 
 
 def _parse_enum[T: str](enum_type: type[T], text: str) -> T | None:
-    value = _blank_to_none(text)
+    value = blank_to_none(text)
     if value is None:
         return None
 
@@ -184,29 +163,3 @@ def _parse_enum[T: str](enum_type: type[T], text: str) -> T | None:
         return enum_type(value)
     except ValueError:
         return None
-
-
-def parse_completion(text: str) -> CompletionType | None:
-    normalized = text.strip().casefold()
-    labels = {
-        "zápočet": CompletionType.CREDIT,
-        "zkouška": CompletionType.EXAM,
-        "zápočet a zkouška": CompletionType.CREDIT_AND_EXAM,
-        "klasifikovaný zápočet": CompletionType.CLASSIFIED_CREDIT,
-        "uznaná zkouška": CompletionType.RECOGNIZED_EXAM,
-        "uznaný klasifikovaný zápočet": CompletionType.RECOGNIZED_CLASSIFIED_CREDIT,
-    }
-    return labels.get(normalized) or _parse_enum(CompletionType, text)
-
-
-def parse_float(text: str) -> float | None:
-    return _parse_float(text)
-
-
-def parse_int(text: str) -> int | None:
-    return _parse_int(text)
-
-
-def _blank_to_none(text: str) -> str | None:
-    text = text.strip()
-    return text or None

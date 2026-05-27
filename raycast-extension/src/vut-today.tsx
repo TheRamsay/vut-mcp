@@ -4,12 +4,11 @@ import {
   Color,
   Icon,
   List,
-  Toast,
   getPreferenceValues,
-  showToast,
 } from "@raycast/api";
-import { useEffect, useState } from "react";
-import { type Preferences, runStudisPython } from "./studis";
+import { useMemo } from "react";
+import { type Preferences } from "./studis";
+import { useStudisData } from "./use-studis-data";
 
 type TodayPreferences = Preferences & { horizonDays: string };
 
@@ -48,55 +47,36 @@ asyncio.run(main())
 export default function Command() {
   const preferences = getPreferenceValues<TodayPreferences>();
   const horizonDays = Number.parseInt(preferences.horizonDays, 10);
-  const [state, setState] = useState<{
-    isLoading: boolean;
-    actions: PendingAction[];
-    error?: string;
-  }>({ isLoading: true, actions: [] });
+  const resolvedHorizonDays = Number.isFinite(horizonDays) ? horizonDays : 7;
+  const args = useMemo(
+    () => [String(resolvedHorizonDays)],
+    [resolvedHorizonDays],
+  );
+  const {
+    isLoading,
+    data: actions,
+    error,
+    reload,
+  } = useStudisData<PendingAction[]>({
+    python: PYTHON,
+    args,
+    initialData: [],
+    failureTitle: "Could not load VUT actions",
+  });
 
-  async function loadActions() {
-    setState((previous) => ({
-      ...previous,
-      isLoading: true,
-      error: undefined,
-    }));
-
-    try {
-      const actions = await runStudisPython<PendingAction[]>(PYTHON, [
-        String(Number.isFinite(horizonDays) ? horizonDays : 7),
-      ]);
-      setState({
-        isLoading: false,
-        actions,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setState({ isLoading: false, actions: [], error: message });
-      await showToast({
-        style: Toast.Style.Failure,
-        title: "Could not load VUT actions",
-        message,
-      });
-    }
-  }
-
-  useEffect(() => {
-    void loadActions();
-  }, []);
-
-  if (state.error) {
+  if (error) {
     return (
-      <List isLoading={state.isLoading}>
+      <List isLoading={isLoading}>
         <List.EmptyView
           icon={Icon.Warning}
           title="Could not load VUT Today"
-          description={state.error}
+          description={error}
           actions={
             <ActionPanel>
               <Action
                 title="Retry"
                 icon={Icon.ArrowClockwise}
-                onAction={loadActions}
+                onAction={reload}
               />
             </ActionPanel>
           }
@@ -107,42 +87,42 @@ export default function Command() {
 
   return (
     <List
-      isLoading={state.isLoading}
+      isLoading={isLoading}
       searchBarPlaceholder="Filter by course, title, severity, or action..."
       navigationTitle="VUT Today"
     >
       <List.EmptyView
         icon={Icon.CheckCircle}
         title="No Pending VUT Actions"
-        description={`No pending actions in the next ${Number.isFinite(horizonDays) ? horizonDays : 7} days.`}
+        description={`No pending actions in the next ${resolvedHorizonDays} days.`}
         actions={
           <ActionPanel>
             <Action
               title="Refresh"
               icon={Icon.ArrowClockwise}
-              onAction={loadActions}
+              onAction={reload}
             />
           </ActionPanel>
         }
       />
       {(["critical", "warning", "info"] as const).map((severity) => {
-        const actions = state.actions.filter(
+        const sectionActions = actions.filter(
           (action) => action.severity === severity,
         );
-        if (actions.length === 0) {
+        if (sectionActions.length === 0) {
           return null;
         }
 
         return (
           <List.Section
             key={severity}
-            title={sectionTitle(severity, actions.length)}
+            title={sectionTitle(severity, sectionActions.length)}
           >
-            {actions.map((action) => (
+            {sectionActions.map((action) => (
               <ActionItem
                 key={actionKey(action)}
                 action={action}
-                onRefresh={loadActions}
+                onRefresh={reload}
               />
             ))}
           </List.Section>

@@ -1,14 +1,6 @@
-import {
-  Action,
-  ActionPanel,
-  Color,
-  Icon,
-  List,
-  Toast,
-  showToast,
-} from "@raycast/api";
-import { useEffect, useState } from "react";
-import { runStudisPython } from "./studis";
+import { Action, ActionPanel, Color, Icon, List } from "@raycast/api";
+import { useCallback } from "react";
+import { useStudisData } from "./use-studis-data";
 
 type Grade = {
   course_code?: string;
@@ -30,26 +22,19 @@ type Grade = {
 const PYTHON = String.raw`
 import asyncio
 import json
-from urllib.parse import urljoin
 
-from vut_studis.client import ELECTRONIC_INDEX_PATH, StudisClient, _find_course_detail_path
+from vut_studis.client import StudisClient
 
 async def main():
     client = StudisClient()
     grades = await client.get_grades()
-    html = await client._get_html(ELECTRONIC_INDEX_PATH)
+    detail_urls = await client.get_course_detail_urls(
+        [grade.course_code for grade in grades if grade.course_code]
+    )
     payload = []
     for grade in grades:
         data = grade.model_dump(mode="json")
-        data["detail_url"] = None
-        if grade.course_code:
-            try:
-                data["detail_url"] = urljoin(
-                    str(client.settings.base_url),
-                    _find_course_detail_path(html, grade.course_code),
-                )
-            except Exception:
-                data["detail_url"] = None
+        data["detail_url"] = detail_urls.get(grade.course_code)
         payload.append(data)
     print(json.dumps(payload, ensure_ascii=False))
 
@@ -57,50 +42,32 @@ asyncio.run(main())
 `;
 
 export default function Command() {
-  const [state, setState] = useState<{
-    isLoading: boolean;
-    grades: Grade[];
-    error?: string;
-  }>({ isLoading: true, grades: [] });
+  const sortLoadedGrades = useCallback(sortGrades, []);
+  const {
+    isLoading,
+    data: grades,
+    error,
+    reload,
+  } = useStudisData<Grade[]>({
+    python: PYTHON,
+    initialData: [],
+    failureTitle: "Could not load VUT grades",
+    transform: sortLoadedGrades,
+  });
 
-  async function loadGrades() {
-    setState((previous) => ({
-      ...previous,
-      isLoading: true,
-      error: undefined,
-    }));
-
-    try {
-      const grades = await runStudisPython<Grade[]>(PYTHON);
-      setState({ isLoading: false, grades: sortGrades(grades) });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setState({ isLoading: false, grades: [], error: message });
-      await showToast({
-        style: Toast.Style.Failure,
-        title: "Could not load VUT grades",
-        message,
-      });
-    }
-  }
-
-  useEffect(() => {
-    void loadGrades();
-  }, []);
-
-  if (state.error) {
+  if (error) {
     return (
-      <List isLoading={state.isLoading}>
+      <List isLoading={isLoading}>
         <List.EmptyView
           icon={Icon.Warning}
           title="Could not load VUT Grades"
-          description={state.error}
+          description={error}
           actions={
             <ActionPanel>
               <Action
                 title="Retry"
                 icon={Icon.ArrowClockwise}
-                onAction={loadGrades}
+                onAction={reload}
               />
             </ActionPanel>
           }
@@ -111,7 +78,7 @@ export default function Command() {
 
   return (
     <List
-      isLoading={state.isLoading}
+      isLoading={isLoading}
       searchBarPlaceholder="Filter by course, points, grade, or semester..."
       navigationTitle="VUT Grades"
     >
@@ -123,22 +90,18 @@ export default function Command() {
             <Action
               title="Refresh"
               icon={Icon.ArrowClockwise}
-              onAction={loadGrades}
+              onAction={reload}
             />
           </ActionPanel>
         }
       />
-      {gradeSections(state.grades).map((section) => (
+      {gradeSections(grades).map((section) => (
         <List.Section
           key={section.title}
           title={`${section.title} (${section.grades.length})`}
         >
           {section.grades.map((grade) => (
-            <GradeItem
-              key={gradeKey(grade)}
-              grade={grade}
-              onRefresh={loadGrades}
-            />
+            <GradeItem key={gradeKey(grade)} grade={grade} onRefresh={reload} />
           ))}
         </List.Section>
       ))}

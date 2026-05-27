@@ -3,6 +3,7 @@ from datetime import date
 from fastmcp import FastMCP
 
 from vut_mcp.context import get_studis_client
+from vut_mcp.payloads import course_points_payload
 
 mcp = FastMCP("VUT Studis")
 
@@ -61,20 +62,7 @@ async def vut_get_course_points(course_code: str, force_refresh: bool = False):
         course_code,
         force_refresh=force_refresh,
     )
-    return [
-        {
-            "course_code": grade.course_code,
-            "course_name": grade.course_name,
-            "points": grade.points,
-            "grade": grade.grade,
-            "grade_awarded_on": grade.grade_awarded_on,
-            "credit_awarded": grade.credit_awarded,
-            "credit_awarded_on": grade.credit_awarded_on,
-            "academic_year": grade.academic_year,
-            "semester": grade.semester,
-        }
-        for grade in grades
-    ]
+    return [course_points_payload(grade) for grade in grades]
 
 
 @mcp.tool()

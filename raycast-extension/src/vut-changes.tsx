@@ -1,14 +1,5 @@
-import {
-  Action,
-  ActionPanel,
-  Color,
-  Icon,
-  List,
-  Toast,
-  showToast,
-} from "@raycast/api";
-import { useEffect, useState } from "react";
-import { runStudisPython } from "./studis";
+import { Action, ActionPanel, Color, Icon, List } from "@raycast/api";
+import { useStudisData } from "./use-studis-data";
 
 type ChangeKind = "added" | "removed" | "updated";
 
@@ -44,50 +35,30 @@ asyncio.run(main())
 `;
 
 export default function Command() {
-  const [state, setState] = useState<{
-    isLoading: boolean;
-    changes?: RecentChanges;
-    error?: string;
-  }>({ isLoading: true });
+  const {
+    isLoading,
+    data: changes,
+    error,
+    reload,
+  } = useStudisData<RecentChanges | undefined>({
+    python: PYTHON,
+    initialData: undefined,
+    failureTitle: "Could not load VUT changes",
+  });
 
-  async function loadChanges() {
-    setState((previous) => ({
-      ...previous,
-      isLoading: true,
-      error: undefined,
-    }));
-
-    try {
-      const changes = await runStudisPython<RecentChanges>(PYTHON);
-      setState({ isLoading: false, changes });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setState({ isLoading: false, error: message });
-      await showToast({
-        style: Toast.Style.Failure,
-        title: "Could not load VUT changes",
-        message,
-      });
-    }
-  }
-
-  useEffect(() => {
-    void loadChanges();
-  }, []);
-
-  if (state.error) {
+  if (error) {
     return (
-      <List isLoading={state.isLoading}>
+      <List isLoading={isLoading}>
         <List.EmptyView
           icon={Icon.Warning}
           title="Could not load VUT Changes"
-          description={state.error}
+          description={error}
           actions={
             <ActionPanel>
               <Action
                 title="Retry"
                 icon={Icon.ArrowClockwise}
-                onAction={loadChanges}
+                onAction={reload}
               />
             </ActionPanel>
           }
@@ -96,11 +67,9 @@ export default function Command() {
     );
   }
 
-  const changes = state.changes;
-
   return (
     <List
-      isLoading={state.isLoading}
+      isLoading={isLoading}
       searchBarPlaceholder="Filter by course, type, field, or title..."
       navigationTitle="VUT Changes"
     >
@@ -113,7 +82,7 @@ export default function Command() {
             <Action
               title="Refresh Snapshot"
               icon={Icon.ArrowClockwise}
-              onAction={loadChanges}
+              onAction={reload}
             />
           </ActionPanel>
         }
@@ -127,7 +96,7 @@ export default function Command() {
             <ChangeItem
               key={changeKey(change)}
               change={change}
-              onRefresh={loadChanges}
+              onRefresh={reload}
             />
           ))}
         </List.Section>

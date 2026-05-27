@@ -1,6 +1,7 @@
 from collections.abc import Awaitable, Callable
 from datetime import date, datetime, timedelta
 from hashlib import sha256
+from urllib.parse import urljoin
 
 import httpx
 from pydantic import BaseModel
@@ -16,7 +17,6 @@ from vut_studis.aggregates import (
     pending_actions_from_assignments,
     pending_actions_from_terms,
 )
-from vut_studis.auth import refresh_session_cookie
 from vut_studis.cache import (
     CacheStore,
     decode_model,
@@ -29,7 +29,7 @@ from vut_studis.change_detection import (
     detect_and_record_changes,
     model_change_resource,
 )
-from vut_studis.config import ENV_PATH, Settings, load_settings, set_env_value
+from vut_studis.config import Settings, load_settings
 from vut_studis.constants import (
     COURSE_DETAIL_CACHE_TTL,
     ELECTRONIC_INDEX_PATH,
@@ -62,6 +62,7 @@ from vut_studis.parsers.assignments import (
 )
 from vut_studis.parsers.grades import parse_grades_html
 from vut_studis.parsers.terms import parse_course_terms_html
+from vut_studis.transport import StudisTransport
 
 
 class StudisClient:
@@ -70,85 +71,17 @@ class StudisClient:
         settings: Settings | None = None,
         *,
         cache_store: CacheStore | None = None,
+        transport: StudisTransport | None = None,
     ) -> None:
         self.settings = settings or load_settings()
         self.cache = cache_store or CacheStore.from_settings(self.settings)
-
-    def _headers(self) -> dict[str, str]:
-        if not self.settings.session_cookie:
-            raise StudisAuthError("VUT_SESSION_COOKIE is not configured.")
-
-        return {"Cookie": self.settings.session_cookie}
-
-    def _http_client(self) -> httpx.AsyncClient:
-        return httpx.AsyncClient(
-            base_url=str(self.settings.base_url),
-            follow_redirects=True,
-            timeout=self.settings.http_timeout_seconds,
-            headers=self._headers(),
-        )
+        self.transport = transport or StudisTransport(self.settings)
 
     async def _get_html(self, path: str) -> str:
-        response = await self._get_response(path)
-        return response.text
+        return await self.transport.get_html(path)
 
     async def _get_response(self, path: str) -> httpx.Response:
-        await self._ensure_session_cookie()
-        response = await self._request_authenticated(path)
-        if response is not None:
-            return response
-
-        if not self._can_refresh_session():
-            raise StudisAuthError(
-                "Studis session expired. Run `uv run vut-studis-debug login-refresh-session`."
-            )
-
-        await self._refresh_session_cookie()
-        response = await self._request_authenticated(path)
-        if response is None:
-            raise StudisAuthError(
-                "Studis session refresh succeeded, but the retry was not authenticated."
-            )
-
-        return response
-
-    async def _request_authenticated(self, path: str) -> httpx.Response | None:
-        async with self._http_client() as client:
-            response = await client.get(path)
-            response.raise_for_status()
-            try:
-                self._ensure_authenticated(response)
-            except StudisAuthError:
-                return None
-
-            return response
-
-    def _ensure_authenticated(self, response: httpx.Response) -> None:
-        title_start = response.text[:2000].lower()
-        if "jednotné přihlášení vut" in title_start or "auth/common" in str(response.url):
-            raise StudisAuthError(
-                "Studis session expired. Run `uv run vut-studis-debug login-refresh-session`."
-            )
-
-    async def _ensure_session_cookie(self) -> None:
-        if self.settings.session_cookie:
-            return
-
-        if not self._can_refresh_session():
-            raise StudisAuthError(
-                "VUT_SESSION_COOKIE is not configured and VUT_USERNAME/VUT_PASSWORD "
-                "are not available for automatic login."
-            )
-
-        await self._refresh_session_cookie()
-
-    def _can_refresh_session(self) -> bool:
-        return bool(self.settings.username and self.settings.password)
-
-    async def _refresh_session_cookie(self) -> None:
-        session_cookie = await refresh_session_cookie(self.settings)
-        set_env_value(ENV_PATH, "VUT_SESSION_COOKIE", session_cookie)
-        self.settings.session_cookie = session_cookie
+        return await self.transport.get_response(path)
 
     async def get_courses(self, *, force_refresh: bool = False) -> list[Course]:
         grades = await self.get_grades(force_refresh=force_refresh)
@@ -226,6 +159,27 @@ class StudisClient:
             for grade in grades
             if grade.course_code is not None and grade.course_code.casefold() == normalized_code
         ]
+
+    async def get_course_detail_urls(
+        self,
+        course_codes: list[str] | None = None,
+        *,
+        force_refresh: bool = False,
+    ) -> dict[str, str]:
+        if course_codes is None:
+            grades = await self.get_grades(force_refresh=force_refresh)
+            course_codes = course_codes_from_grades(grades)
+
+        html = await self._get_html(ELECTRONIC_INDEX_PATH)
+        detail_urls: dict[str, str] = {}
+        for course_code in course_codes:
+            try:
+                detail_path = _find_course_detail_path(html, course_code)
+            except StudisAuthError:
+                continue
+            detail_urls[course_code] = urljoin(str(self.settings.base_url), detail_path)
+
+        return detail_urls
 
     async def get_course_assessment(
         self,

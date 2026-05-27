@@ -11,7 +11,14 @@ from vut_studis.models import (
     CompletionType,
     CourseAssessment,
 )
-from vut_studis.parsers.grades import parse_completion, parse_float, parse_int
+from vut_studis.parsers.common import (
+    clean_text,
+    parse_completion,
+    parse_course_heading,
+    parse_float,
+    parse_int,
+    parse_numbered_name,
+)
 
 ASSESSMENT_HEADERS = {
     "Název",
@@ -30,7 +37,7 @@ ASSESSMENT_HEADERS = {
 
 def parse_course_assessment_html(html: str, base_url: str = "") -> CourseAssessment:
     tree = HTMLParser(html)
-    course_code, course_name, academic_year = _parse_course_heading(tree)
+    course_code, course_name, academic_year = _parse_assessment_course_heading(tree)
 
     return CourseAssessment(
         course_code=course_code,
@@ -75,7 +82,7 @@ def parse_assessment_message_html(
 
 def _parse_assessment_items(tree: HTMLParser, *, base_url: str) -> list[AssessmentItem]:
     for table in tree.css("table"):
-        headers = {_clean_text(header) for header in table.css("th")}
+        headers = {clean_text(header) for header in table.css("th")}
         if not ASSESSMENT_HEADERS.issubset(headers):
             continue
 
@@ -89,8 +96,8 @@ def _parse_assessment_table(table: Node, *, base_url: str) -> list[AssessmentIte
     current_item: AssessmentItem | None = None
 
     for row in table.css("tr"):
-        headers = [_clean_text(header) for header in row.css("th")]
-        cells = [_clean_text(cell) for cell in row.css("td")]
+        headers = [clean_text(header) for header in row.css("th")]
+        cells = [clean_text(cell) for cell in row.css("td")]
 
         if headers and headers[0] == "Název":
             continue
@@ -114,7 +121,7 @@ def _parse_assessment_table(table: Node, *, base_url: str) -> list[AssessmentIte
 
 
 def _parse_parent_item(cells: list[str], *, row: Node, base_url: str) -> AssessmentItem:
-    order, name, category = _parse_numbered_name(cells[0])
+    order, name, category = parse_numbered_name(cells[0])
     return AssessmentItem(
         order=order,
         name=name,
@@ -146,13 +153,10 @@ def _parse_entry(cells: list[str], *, row: Node, base_url: str) -> AssessmentEnt
     )
 
 
-def _parse_course_heading(tree: HTMLParser) -> tuple[str, str | None, str | None]:
-    for heading in tree.css("h3, h2"):
-        text = _clean_text(heading)
-        match = re.fullmatch(r"([A-Za-z0-9-]+)\s+-\s+(.+?)\(a\.r\.(\d{4}/\d{4})\)", text)
-        if match:
-            course_code, course_name, academic_year = match.groups()
-            return course_code, course_name.strip(), academic_year
+def _parse_assessment_course_heading(tree: HTMLParser) -> tuple[str, str | None, str | None]:
+    course_code, course_name, academic_year = parse_course_heading(tree)
+    if course_code:
+        return course_code, course_name, academic_year
 
     return (
         _parse_label_value(tree, "Zkratka předmětu:") or "",
@@ -168,8 +172,8 @@ def _parse_label_value(tree: HTMLParser, label: str) -> str | None:
         if len(headers) != 1 or len(cells) != 1:
             continue
 
-        if _clean_text(headers[0]) == label:
-            value = _clean_text(cells[0])
+        if clean_text(headers[0]) == label:
+            value = clean_text(cells[0])
             return value or None
 
     return None
@@ -177,7 +181,7 @@ def _parse_label_value(tree: HTMLParser, label: str) -> str | None:
 
 def _parse_legacy_course_name(tree: HTMLParser) -> str | None:
     for heading in tree.css("h2"):
-        text = _clean_text(heading)
+        text = clean_text(heading)
         if "karta na webu fakulty" in text:
             return re.sub(r"\s*\(karta na webu fakulty\)\s*$", "", text)
     return None
@@ -185,15 +189,6 @@ def _parse_legacy_course_name(tree: HTMLParser) -> str | None:
 
 def _parse_completion(tree: HTMLParser) -> CompletionType | None:
     return parse_completion(_parse_label_value(tree, "Ukončení:") or "")
-
-
-def _parse_numbered_name(text: str) -> tuple[int | None, str, str | None]:
-    match = re.fullmatch(r"(\d+)\.\s+(.+?)(?:\s+\(([^()]*)\))?", text)
-    if not match:
-        return None, text, None
-
-    order, name, category = match.groups()
-    return int(order), name, category
 
 
 def _parse_required(text: str) -> bool | None:
@@ -226,7 +221,7 @@ def _parse_message_title(tree: HTMLParser) -> str | None:
         node = tree.css_first(selector)
         if node is None:
             continue
-        title = _clean_text(node)
+        title = clean_text(node)
         if title:
             return title
     return None
@@ -242,7 +237,7 @@ def _parse_message_labels(tree: HTMLParser) -> dict[str, str]:
             continue
 
         label = _clean_label(headers[0])
-        value = _clean_text(cells[0])
+        value = clean_text(cells[0])
         if label and value:
             labels[label] = value
 
@@ -251,7 +246,7 @@ def _parse_message_labels(tree: HTMLParser) -> dict[str, str]:
         values = row.css("dd")
         for term, value_node in zip(labels_by_term, values, strict=False):
             label = _clean_label(term)
-            value = _clean_text(value_node)
+            value = clean_text(value_node)
             if label and value:
                 labels[label] = value
 
@@ -268,11 +263,11 @@ def _parse_message_body(tree: HTMLParser, labels: dict[str, str]) -> str:
         node = tree.css_first(selector)
         if node is None:
             continue
-        text = _clean_text(node)
+        text = clean_text(node)
         if text:
             return text
 
-    return _clean_text(tree.body) if tree.body is not None else _clean_text(tree.root)
+    return clean_text(tree.body) if tree.body is not None else clean_text(tree.root)
 
 
 def _first_label(labels: dict[str, str], *names: str) -> str | None:
@@ -314,9 +309,5 @@ def _parse_message_url(row: Node, base_url: str) -> str | None:
     return None
 
 
-def _clean_text(node: Node) -> str:
-    return re.sub(r"\s+", " ", node.text(strip=True)).strip()
-
-
 def _clean_label(node: Node) -> str:
-    return _clean_text(node).rstrip(":").strip()
+    return clean_text(node).rstrip(":").strip()
