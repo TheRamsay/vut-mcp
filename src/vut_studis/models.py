@@ -111,6 +111,24 @@ class RecentChanges(StudisModel):
     changes: list[StudisChange]
 
 
+class ChangeNotification(StudisModel):
+    id: str
+    title: str
+    body: str
+    course_code: str | None = None
+    resource_type: str
+    resource_id: str
+    change_kind: ChangeKind
+    detected_at: datetime
+
+
+class ChangeNotificationResult(StudisModel):
+    baseline_created: bool
+    captured_at: datetime
+    notifications: list[ChangeNotification]
+    suppressed_count: int = 0
+
+
 class CourseLanguage(StrEnum):
     CZECH = "cs"
     ENGLISH = "en"

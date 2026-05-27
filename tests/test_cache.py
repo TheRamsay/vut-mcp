@@ -166,6 +166,23 @@ def test_cache_status_and_clear(tmp_path) -> None:
     assert store.status().entries == 0
 
 
+def test_delivered_notification_dedupe(tmp_path) -> None:
+    store = CacheStore(tmp_path / "cache.sqlite3")
+
+    assert store.get_delivered_notification_ids(
+        scope="test",
+        notification_ids=["a", "b"],
+    ) == set()
+
+    store.record_delivered_notifications(scope="test", notification_ids=["a"])
+
+    assert store.get_delivered_notification_ids(
+        scope="test",
+        notification_ids=["a", "b"],
+    ) == {"a"}
+    assert store.status().delivered_notifications == 1
+
+
 def test_empty_cache_path_uses_default() -> None:
     settings = Settings(VUT_BASE_URL="https://www.vut.cz", VUT_CACHE_PATH="")
 

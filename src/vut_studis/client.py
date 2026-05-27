@@ -40,6 +40,7 @@ from vut_studis.models import (
     AssessmentEntry,
     AssessmentItem,
     AssessmentMessage,
+    ChangeNotificationResult,
     Course,
     CourseAssessment,
     CourseAssignments,
@@ -50,6 +51,11 @@ from vut_studis.models import (
     RecentChanges,
     ScheduleItem,
     StudentSummary,
+)
+from vut_studis.notifications import (
+    NotificationMode,
+    include_pending_actions_for_mode,
+    plan_change_notifications,
 )
 from vut_studis.parsers.assessments import (
     parse_assessment_message_html,
@@ -402,6 +408,46 @@ class StudisClient:
             scope=self._cache_scope(),
             resources=resources,
             resource_types=resource_types,
+        )
+
+    async def get_change_notifications(
+        self,
+        *,
+        mode: NotificationMode = "fast",
+        force_refresh: bool = True,
+        private: bool = False,
+        mark_delivered: bool = True,
+    ) -> ChangeNotificationResult:
+        changes = await self.get_recent_changes(
+            force_refresh=force_refresh,
+            include_pending_actions=include_pending_actions_for_mode(mode),
+        )
+        planned = plan_change_notifications(changes, private=private)
+        delivered_ids = self.cache.get_delivered_notification_ids(
+            scope=self._cache_scope(),
+            notification_ids=[notification.id for notification in planned],
+        )
+        notifications = [
+            notification for notification in planned if notification.id not in delivered_ids
+        ]
+
+        if mark_delivered:
+            self.cache.record_delivered_notifications(
+                scope=self._cache_scope(),
+                notification_ids=[notification.id for notification in notifications],
+            )
+
+        return ChangeNotificationResult(
+            baseline_created=changes.baseline_created,
+            captured_at=changes.captured_at,
+            notifications=notifications,
+            suppressed_count=len(planned) - len(notifications),
+        )
+
+    def record_change_notifications_delivered(self, notification_ids: list[str]) -> None:
+        self.cache.record_delivered_notifications(
+            scope=self._cache_scope(),
+            notification_ids=notification_ids,
         )
 
     def _cache_key(self, resource_type: str, *parts: str) -> str:

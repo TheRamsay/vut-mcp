@@ -87,6 +87,30 @@
           "default": "/opt/homebrew/bin/uv"
         }
       ]
+    },
+    {
+      "name": "vut-check-now",
+      "title": "VUT Check Now",
+      "description": "Check Studis for new grade and point changes.",
+      "mode": "no-view",
+      "preferences": [
+        {
+          "name": "repositoryPath",
+          "title": "Repository Path",
+          "description": "Path to the local vut-mcp repository.",
+          "type": "textfield",
+          "required": true,
+          "default": "/Users/ramsay/dev/vut-mcp"
+        },
+        {
+          "name": "uvPath",
+          "title": "uv Path",
+          "description": "Full path to uv.",
+          "type": "textfield",
+          "required": true,
+          "default": "/opt/homebrew/bin/uv"
+        }
+      ]
     }
   ],
   "dependencies": {

@@ -1,9 +1,11 @@
 from datetime import date
+from typing import cast
 
 from fastmcp import FastMCP
 
 from vut_mcp.context import get_studis_client
 from vut_mcp.payloads import course_points_payload
+from vut_studis.notifications import NotificationMode
 
 mcp = FastMCP("VUT Studis")
 
@@ -43,6 +45,24 @@ async def vut_get_recent_changes(
     return await get_studis_client().get_recent_changes(
         force_refresh=force_refresh,
         include_pending_actions=include_pending_actions,
+    )
+
+
+@mcp.tool()
+async def vut_get_change_notifications(
+    mode: str = "fast",
+    force_refresh: bool = True,
+    private: bool = False,
+    mark_delivered: bool = False,
+):
+    """Get notifiable Studis changes without sending desktop notifications."""
+    if mode not in {"fast", "deep"}:
+        raise ValueError("mode must be 'fast' or 'deep'")
+    return await get_studis_client().get_change_notifications(
+        mode=cast(NotificationMode, mode),
+        force_refresh=force_refresh,
+        private=private,
+        mark_delivered=mark_delivered,
     )
 
 

@@ -62,6 +62,7 @@ Current tools:
 - `vut_get_student_summary`
 - `vut_get_pending_actions`
 - `vut_get_recent_changes`
+- `vut_get_change_notifications`
 - `vut_get_courses`
 - `vut_get_grades`
 - `vut_get_course_points`
@@ -94,6 +95,8 @@ Commands:
   for course detail pages.
 - `VUT Changes`: fast snapshot diff for courses and grades/points since the
   previous check.
+- `VUT Check Now`: no-view command that checks grade/point changes and shows a
+  Raycast toast.
 
 Each command has preferences for repository path and `uv` path. Defaults are set
 for this local checkout.
@@ -107,6 +110,8 @@ uv run vut-studis-debug summary
 uv run vut-studis-debug pending-actions --horizon-days 14
 uv run vut-studis-debug recent-changes
 uv run vut-studis-debug recent-changes --no-pending-actions
+uv run vut-studis-debug notify-changes --mode fast
+uv run vut-studis-debug notify-changes --mode deep --private
 uv run vut-studis-debug grades
 uv run vut-studis-debug course-assessment FLP
 uv run vut-studis-debug course-terms FLP

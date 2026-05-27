@@ -36,6 +36,7 @@ class CacheStatus:
     entries: int
     expired_entries: int
     state_snapshots: int
+    delivered_notifications: int
     size_bytes: int
 
 
@@ -121,6 +122,8 @@ class CacheStore:
             cursor = connection.execute("DELETE FROM cache_entries")
             removed = cursor.rowcount
             cursor = connection.execute("DELETE FROM state_snapshots")
+            removed += cursor.rowcount
+            cursor = connection.execute("DELETE FROM delivered_notifications")
             return removed + cursor.rowcount
 
     def delete(self, key: str) -> None:
@@ -212,6 +215,56 @@ class CacheStore:
                 ),
             )
 
+    def get_delivered_notification_ids(
+        self,
+        *,
+        scope: str,
+        notification_ids: Sequence[str],
+    ) -> set[str]:
+        if self.disabled or not self.path.exists() or not notification_ids:
+            return set()
+
+        placeholders = ",".join("?" for _ in notification_ids)
+        with self._connection() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT notification_id
+                FROM delivered_notifications
+                WHERE scope = ? AND notification_id IN ({placeholders})
+                """,
+                (scope, *notification_ids),
+            ).fetchall()
+
+        return {str(row["notification_id"]) for row in rows}
+
+    def record_delivered_notifications(
+        self,
+        *,
+        scope: str,
+        notification_ids: Sequence[str],
+        delivered_at: datetime | None = None,
+    ) -> None:
+        if self.disabled or not notification_ids:
+            return
+
+        delivered_at = delivered_at or _utc_now()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self._connection() as connection:
+            connection.executemany(
+                """
+                INSERT OR IGNORE INTO delivered_notifications (
+                    scope,
+                    notification_id,
+                    delivered_at
+                )
+                VALUES (?, ?, ?)
+                """,
+                [
+                    (scope, notification_id, _to_iso(delivered_at))
+                    for notification_id in notification_ids
+                ],
+            )
+
     def status(self) -> CacheStatus:
         if self.disabled or not self.path.exists():
             return CacheStatus(
@@ -220,6 +273,7 @@ class CacheStore:
                 entries=0,
                 expired_entries=0,
                 state_snapshots=0,
+                delivered_notifications=0,
                 size_bytes=0,
             )
 
@@ -233,6 +287,9 @@ class CacheStore:
             state_snapshots = connection.execute(
                 "SELECT count(*) FROM state_snapshots",
             ).fetchone()[0]
+            delivered_notifications = connection.execute(
+                "SELECT count(*) FROM delivered_notifications",
+            ).fetchone()[0]
 
         return CacheStatus(
             path=self.path,
@@ -240,6 +297,7 @@ class CacheStore:
             entries=entries,
             expired_entries=expired_entries,
             state_snapshots=state_snapshots,
+            delivered_notifications=delivered_notifications,
             size_bytes=self.path.stat().st_size,
         )
 
@@ -356,6 +414,16 @@ class CacheStore:
             """
             CREATE INDEX IF NOT EXISTS idx_state_snapshots_latest
             ON state_snapshots(scope, resource_type, resource_id, captured_at DESC)
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS delivered_notifications (
+                scope TEXT NOT NULL,
+                notification_id TEXT NOT NULL,
+                delivered_at TEXT NOT NULL,
+                PRIMARY KEY (scope, notification_id)
+            )
             """
         )
         return connection

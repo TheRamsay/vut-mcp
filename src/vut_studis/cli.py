@@ -1,5 +1,5 @@
 import asyncio
-from typing import Annotated
+from typing import Annotated, cast
 
 import typer
 from rich.console import Console
@@ -9,6 +9,7 @@ from vut_studis.cache import CacheStore
 from vut_studis.client import StudisClient
 from vut_studis.config import ENV_PATH, load_settings, set_env_value
 from vut_studis.errors import StudisError
+from vut_studis.notifications import NotificationMode, send_macos_notification
 
 app = typer.Typer(help="Debug CLI for the standalone VUT Studis client.")
 console = Console()
@@ -89,6 +90,51 @@ def recent_changes(
         )
     )
     console.print(result.model_dump(mode="json"))
+
+
+@app.command("notify-changes")
+def notify_changes(
+    mode: Annotated[
+        str,
+        typer.Option("--mode", help="fast checks grades/courses; deep also scans pending actions."),
+    ] = "fast",
+    live: Annotated[
+        bool,
+        typer.Option("--live/--cached", help="Fetch live data before comparing snapshots."),
+    ] = True,
+    private: Annotated[
+        bool,
+        typer.Option("--private", help="Hide changed values in notification bodies."),
+    ] = False,
+    send: Annotated[
+        bool,
+        typer.Option("--send/--no-send", help="Send macOS notifications for new changes."),
+    ] = True,
+) -> None:
+    """Check Studis changes and optionally send macOS notifications."""
+    client = StudisClient()
+    result = asyncio.run(
+        client.get_change_notifications(
+            mode=_notification_mode(mode),
+            force_refresh=live,
+            private=private,
+            mark_delivered=False,
+        )
+    )
+
+    delivered_ids: list[str] = []
+    if send:
+        for notification in result.notifications:
+            send_macos_notification(notification)
+            delivered_ids.append(notification.id)
+        client.record_change_notifications_delivered(delivered_ids)
+
+    console.print(
+        {
+            **result.model_dump(mode="json"),
+            "sent_count": len(delivered_ids),
+        }
+    )
 
 
 @app.command()
@@ -201,6 +247,7 @@ def cache_status() -> None:
             "entries": status.entries,
             "expired_entries": status.expired_entries,
             "state_snapshots": status.state_snapshots,
+            "delivered_notifications": status.delivered_notifications,
             "size_bytes": status.size_bytes,
         }
     )
@@ -211,6 +258,12 @@ def cache_clear() -> None:
     """Clear all local cache entries."""
     removed = CacheStore.from_settings(load_settings()).clear()
     console.print({"removed_entries": removed})
+
+
+def _notification_mode(value: str) -> NotificationMode:
+    if value not in {"fast", "deep"}:
+        raise typer.BadParameter("mode must be 'fast' or 'deep'")
+    return cast(NotificationMode, value)
 
 
 @app.command("login-inspect")

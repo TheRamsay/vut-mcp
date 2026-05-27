@@ -36,6 +36,13 @@ declare namespace Preferences {
   /** uv Path - Full path to uv. */
   "uvPath": string
 }
+  /** Preferences accessible in the `vut-check-now` command */
+  export type VutCheckNow = ExtensionPreferences & {
+  /** Repository Path - Path to the local vut-mcp repository. */
+  "repositoryPath": string,
+  /** uv Path - Full path to uv. */
+  "uvPath": string
+}
 }
 
 declare namespace Arguments {
@@ -45,5 +52,7 @@ declare namespace Arguments {
   export type VutGrades = {}
   /** Arguments passed to the `vut-changes` command */
   export type VutChanges = {}
+  /** Arguments passed to the `vut-check-now` command */
+  export type VutCheckNow = {}
 }
 
