@@ -16,6 +16,7 @@ from vut_studis.aggregates import (
     pending_actions_from_assignments,
     pending_actions_from_terms,
 )
+from vut_studis.auth import refresh_session_cookie
 from vut_studis.cache import (
     CacheStore,
     decode_model,
@@ -28,7 +29,7 @@ from vut_studis.change_detection import (
     detect_and_record_changes,
     model_change_resource,
 )
-from vut_studis.config import Settings, load_settings
+from vut_studis.config import ENV_PATH, Settings, load_settings, set_env_value
 from vut_studis.errors import StudisAuthError
 from vut_studis.models import (
     AssessmentEntry,
@@ -87,11 +88,31 @@ class StudisClient:
         )
 
     async def _get_html(self, path: str) -> str:
+        response = await self._get_response(path)
+        return response.text
+
+    async def _get_response(self, path: str) -> httpx.Response:
+        return await self._get_response_with_auth_retry(path, did_refresh=False)
+
+    async def _get_response_with_auth_retry(
+        self,
+        path: str,
+        *,
+        did_refresh: bool,
+    ) -> httpx.Response:
+        await self._ensure_session_cookie()
         async with self._http_client() as client:
             response = await client.get(path)
             response.raise_for_status()
-            self._ensure_authenticated(response)
-            return response.text
+            try:
+                self._ensure_authenticated(response)
+            except StudisAuthError:
+                if did_refresh or not self._can_refresh_session():
+                    raise
+                await self._refresh_session_cookie()
+                return await self._get_response_with_auth_retry(path, did_refresh=True)
+
+            return response
 
     def _ensure_authenticated(self, response: httpx.Response) -> None:
         title_start = response.text[:2000].lower()
@@ -99,6 +120,26 @@ class StudisClient:
             raise StudisAuthError(
                 "Studis session expired. Run `uv run vut-studis-debug login-refresh-session`."
             )
+
+    async def _ensure_session_cookie(self) -> None:
+        if self.settings.session_cookie:
+            return
+
+        if not self._can_refresh_session():
+            raise StudisAuthError(
+                "VUT_SESSION_COOKIE is not configured and VUT_USERNAME/VUT_PASSWORD "
+                "are not available for automatic login."
+            )
+
+        await self._refresh_session_cookie()
+
+    def _can_refresh_session(self) -> bool:
+        return bool(self.settings.username and self.settings.password)
+
+    async def _refresh_session_cookie(self) -> None:
+        session_cookie = await refresh_session_cookie(self.settings)
+        set_env_value(ENV_PATH, "VUT_SESSION_COOKIE", session_cookie)
+        self.settings.session_cookie = session_cookie
 
     async def get_courses(self, *, force_refresh: bool = False) -> list[Course]:
         grades = await self.get_grades(force_refresh=force_refresh)
@@ -245,11 +286,7 @@ class StudisClient:
         item: AssessmentItem,
         entry: AssessmentEntry | None,
     ) -> AssessmentMessage:
-        async with self._http_client() as client:
-            response = await client.get(url)
-            response.raise_for_status()
-            self._ensure_authenticated(response)
-
+        response = await self._get_response(url)
         return parse_assessment_message_html(
             response.text,
             url=str(response.url),
@@ -300,40 +337,35 @@ class StudisClient:
         assignments = parse_course_assignments_html(response.text, base_url=str(response.url))
         enriched = []
 
-        async with self._http_client() as client:
-            for assignment in assignments.assignments:
-                if assignment.detail_url is None:
-                    enriched.append(assignment)
-                    continue
+        for assignment in assignments.assignments:
+            if assignment.detail_url is None:
+                enriched.append(assignment)
+                continue
 
-                detail_response = await client.get(assignment.detail_url)
-                detail_response.raise_for_status()
-                self._ensure_authenticated(detail_response)
-                detail = parse_assignment_detail_html(
-                    detail_response.text,
-                    base_url=str(detail_response.url),
+            detail_response = await self._get_response(assignment.detail_url)
+            detail = parse_assignment_detail_html(
+                detail_response.text,
+                base_url=str(detail_response.url),
+            )
+
+            submitted_files = []
+            submission_url = detail.get("submission_url")
+            if isinstance(submission_url, str):
+                submission_response = await self._get_response(submission_url)
+                submitted_files = parse_assignment_submission_html(
+                    submission_response.text,
+                    base_url=str(submission_response.url),
                 )
 
-                submitted_files = []
-                submission_url = detail.get("submission_url")
-                if isinstance(submission_url, str):
-                    submission_response = await client.get(submission_url)
-                    submission_response.raise_for_status()
-                    self._ensure_authenticated(submission_response)
-                    submitted_files = parse_assignment_submission_html(
-                        submission_response.text,
-                        base_url=str(submission_response.url),
-                    )
-
-                enriched.append(
-                    assignment.model_copy(
-                        update={
-                            **detail,
-                            "submitted": bool(submitted_files),
-                            "submitted_files": submitted_files,
-                        }
-                    )
+            enriched.append(
+                assignment.model_copy(
+                    update={
+                        **detail,
+                        "submitted": bool(submitted_files),
+                        "submitted_files": submitted_files,
+                    }
                 )
+            )
 
         return assignments.model_copy(update={"assignments": enriched})
 
@@ -361,11 +393,7 @@ class StudisClient:
     async def _get_course_detail_response(self, course_code: str) -> httpx.Response:
         html = await self._get_html(ELECTRONIC_INDEX_PATH)
         detail_path = _find_course_detail_path(html, course_code)
-        async with self._http_client() as client:
-            response = await client.get(detail_path)
-            response.raise_for_status()
-            self._ensure_authenticated(response)
-            return response
+        return await self._get_response(detail_path)
 
     async def get_student_summary(self, *, force_refresh: bool = False) -> StudentSummary:
         grades = await self.get_grades(force_refresh=force_refresh)

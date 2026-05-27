@@ -3,6 +3,8 @@ from pathlib import Path
 from pydantic import AnyHttpUrl, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+ENV_PATH = Path(".env")
+
 
 class Settings(BaseSettings):
     base_url: AnyHttpUrl = Field(alias="VUT_BASE_URL")
@@ -25,3 +27,21 @@ class Settings(BaseSettings):
 
 def load_settings() -> Settings:
     return Settings()
+
+
+def set_env_value(path: Path, key: str, value: str) -> None:
+    lines = path.read_text().splitlines() if path.exists() else []
+    replacement = f'{key}="{_escape_env_value(value)}"'
+
+    for index, line in enumerate(lines):
+        if line.startswith(f"{key}="):
+            lines[index] = replacement
+            break
+    else:
+        lines.append(replacement)
+
+    path.write_text("\n".join(lines) + "\n")
+
+
+def _escape_env_value(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')

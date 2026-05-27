@@ -1,5 +1,4 @@
 import asyncio
-from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -8,12 +7,11 @@ from rich.console import Console
 from vut_studis.auth import inspect_login_flow, login_with_password
 from vut_studis.cache import CacheStore
 from vut_studis.client import StudisClient
-from vut_studis.config import load_settings
+from vut_studis.config import ENV_PATH, load_settings, set_env_value
 from vut_studis.errors import StudisError
 
 app = typer.Typer(help="Debug CLI for the standalone VUT Studis client.")
 console = Console()
-ENV_PATH = Path(".env")
 
 
 @app.command()
@@ -266,7 +264,7 @@ def login_refresh_session() -> None:
     if not result.authenticated:
         raise typer.BadParameter("Login did not reach an authenticated Studis page.")
 
-    _set_env_value(ENV_PATH, "VUT_SESSION_COOKIE", result.session_cookie)
+    set_env_value(ENV_PATH, "VUT_SESSION_COOKIE", result.session_cookie)
     console.print(
         {
             "updated": str(ENV_PATH),
@@ -275,21 +273,3 @@ def login_refresh_session() -> None:
             "title": result.title,
         }
     )
-
-
-def _set_env_value(path: Path, key: str, value: str) -> None:
-    lines = path.read_text().splitlines() if path.exists() else []
-    replacement = f'{key}="{_escape_env_value(value)}"'
-
-    for index, line in enumerate(lines):
-        if line.startswith(f"{key}="):
-            lines[index] = replacement
-            break
-    else:
-        lines.append(replacement)
-
-    path.write_text("\n".join(lines) + "\n")
-
-
-def _escape_env_value(value: str) -> str:
-    return value.replace("\\", "\\\\").replace('"', '\\"')

@@ -45,7 +45,9 @@ uv run vut-studis-debug login-refresh-session
 ```
 
 The command updates `VUT_SESSION_COOKIE` in `.env`. Studis sessions expire, so
-rerun it when tools report an expired session.
+the client automatically refreshes the cookie and retries once when
+`VUT_USERNAME` and `VUT_PASSWORD` are configured. You can still run the command
+manually when you want to refresh the session explicitly.
 
 ## MCP
 
