@@ -96,12 +96,15 @@ Commands:
 - `VUT Changes`: fast snapshot diff for courses and grades/points since the
   previous check.
 - `VUT Check Now`: no-view command that checks grade/point changes and shows a
-  clean macOS notification plus a Raycast toast.
+  Raycast toast.
 
 Each command has preferences for repository path and `uv` path. Defaults are set
 for this local checkout.
 
 ## Notifications
+
+Desktop macOS banners are currently **WIP/experimental**. Raycast toasts are the
+supported notification UI for now.
 
 Build the native macOS notification helper:
 
@@ -110,10 +113,15 @@ Build the native macOS notification helper:
 ./scripts/install-macos-notifier.sh
 ```
 
-The helper app is installed at `~/Applications/VUT Studis Notifier.app` and is
-preferred by the Python notifier. On first use, macOS may ask for notification
-permission for `VUT Studis`. Enable banners in System Settings -> Notifications
--> VUT Studis.
+The helper app is installed at `~/Applications/VUT Studis Notifier.app`. It is
+not used by default because macOS Notification Center and windowing behavior has
+been inconsistent in local testing.
+
+To explicitly try the WIP desktop path:
+
+```bash
+VUT_ENABLE_DESKTOP_NOTIFICATIONS=1 uv run vut-studis-debug notify-changes --send
+```
 
 ## Debug CLI
 
@@ -133,8 +141,7 @@ uv run vut-studis-debug course-assignments FLP
 uv run vut-studis-debug assessment-message FLP --item 2 --entry 1
 ```
 
-If the native helper is not built, the CLI falls back to `terminal-notifier` when
-available:
+The experimental desktop path falls back to `terminal-notifier` when available:
 
 ```bash
 brew install terminal-notifier

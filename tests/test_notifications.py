@@ -60,6 +60,7 @@ def test_send_macos_notification_prefers_native_helper(monkeypatch) -> None:
     commands: list[list[str]] = []
     notification = _notification()
 
+    monkeypatch.setenv("VUT_ENABLE_DESKTOP_NOTIFICATIONS", "1")
     monkeypatch.setattr(
         "vut_studis.notifications._native_notifier_app_path",
         lambda: Path("/Applications/VUT Studis Notifier.app"),
@@ -92,6 +93,7 @@ def test_send_macos_notification_falls_back_to_terminal_notifier(monkeypatch) ->
     commands: list[list[str]] = []
     notification = _notification()
 
+    monkeypatch.setenv("VUT_ENABLE_DESKTOP_NOTIFICATIONS", "1")
     monkeypatch.setattr("vut_studis.notifications._native_notifier_app_path", lambda: None)
     monkeypatch.setattr("vut_studis.notifications.shutil.which", lambda name: "/bin/notifier")
     monkeypatch.setattr(
@@ -117,6 +119,7 @@ def test_send_macos_notification_falls_back_to_osascript(monkeypatch) -> None:
     commands: list[list[str]] = []
     notification = _notification()
 
+    monkeypatch.setenv("VUT_ENABLE_DESKTOP_NOTIFICATIONS", "1")
     monkeypatch.setattr("vut_studis.notifications._native_notifier_app_path", lambda: None)
     monkeypatch.setattr("vut_studis.notifications.shutil.which", lambda name: None)
     monkeypatch.setattr(
@@ -128,6 +131,20 @@ def test_send_macos_notification_falls_back_to_osascript(monkeypatch) -> None:
 
     assert commands[0][0] == "osascript"
     assert 'with title "VUT Studis" subtitle "FLP points changed"' in commands[0][2]
+
+
+def test_send_macos_notification_is_disabled_by_default(monkeypatch) -> None:
+    commands: list[list[str]] = []
+
+    monkeypatch.delenv("VUT_ENABLE_DESKTOP_NOTIFICATIONS", raising=False)
+    monkeypatch.setattr(
+        "vut_studis.notifications.subprocess.run",
+        lambda command, check: commands.append(command),
+    )
+
+    send_macos_notification(_notification())
+
+    assert commands == []
 
 
 def _notification() -> ChangeNotification:

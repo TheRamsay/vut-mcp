@@ -10,6 +10,7 @@ from vut_studis.models import ChangeKind, ChangeNotification, RecentChanges, Stu
 
 NotificationMode = Literal["fast", "deep"]
 NOTIFICATION_TITLE = "VUT Studis"
+ENABLE_DESKTOP_NOTIFICATIONS_ENV = "VUT_ENABLE_DESKTOP_NOTIFICATIONS"
 
 IMPORTANT_GRADE_FIELDS = {
     "points",
@@ -53,6 +54,9 @@ def plan_change_notifications(
 
 
 def send_macos_notification(notification: ChangeNotification) -> None:
+    if not _desktop_notifications_enabled():
+        return
+
     native_notifier = _native_notifier_app_path()
     if native_notifier is not None:
         _send_native_notifier(native_notifier, notification)
@@ -246,6 +250,15 @@ def _format_value(value: object) -> str:
 
 def _applescript_string(value: str) -> str:
     return json.dumps(value)
+
+
+def _desktop_notifications_enabled() -> bool:
+    return os.environ.get(ENABLE_DESKTOP_NOTIFICATIONS_ENV, "").casefold() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def _native_notifier_executable() -> Path | None:

@@ -108,10 +108,13 @@ def notify_changes(
     ] = False,
     send: Annotated[
         bool,
-        typer.Option("--send/--no-send", help="Send macOS notifications for new changes."),
-    ] = True,
+        typer.Option(
+            "--send/--no-send",
+            help="Try the experimental macOS desktop notifier for new changes.",
+        ),
+    ] = False,
 ) -> None:
-    """Check Studis changes and optionally send macOS notifications."""
+    """Check Studis changes and optionally try the WIP desktop notifier."""
     client = StudisClient()
     result = asyncio.run(
         client.get_change_notifications(
@@ -133,6 +136,7 @@ def notify_changes(
         {
             **result.model_dump(mode="json"),
             "sent_count": len(delivered_ids),
+            "desktop_notifications": "wip" if send else "disabled",
         }
     )
 
