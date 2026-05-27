@@ -1,11 +1,15 @@
 import json
+import os
+import shutil
 import subprocess
 from hashlib import sha256
+from pathlib import Path
 from typing import Literal
 
 from vut_studis.models import ChangeKind, ChangeNotification, RecentChanges, StudisChange
 
 NotificationMode = Literal["fast", "deep"]
+NOTIFICATION_TITLE = "VUT Studis"
 
 IMPORTANT_GRADE_FIELDS = {
     "points",
@@ -49,6 +53,66 @@ def plan_change_notifications(
 
 
 def send_macos_notification(notification: ChangeNotification) -> None:
+    native_notifier = _native_notifier_app_path()
+    if native_notifier is not None:
+        _send_native_notifier(native_notifier, notification)
+        return
+
+    terminal_notifier = shutil.which("terminal-notifier")
+    if terminal_notifier is not None:
+        _send_terminal_notifier(terminal_notifier, notification)
+        return
+
+    _send_osascript_notification(notification)
+
+
+def _send_native_notifier(
+    app_path: Path,
+    notification: ChangeNotification,
+) -> None:
+    subprocess.run(
+        [
+            "open",
+            "-W",
+            "-n",
+            str(app_path),
+            "--args",
+            "--title",
+            NOTIFICATION_TITLE,
+            "--subtitle",
+            _notification_subtitle(notification),
+            "--message",
+            notification.body,
+            "--id",
+            notification.id,
+        ],
+        check=True,
+    )
+
+
+def _send_terminal_notifier(
+    executable: str,
+    notification: ChangeNotification,
+) -> None:
+    command = [
+        executable,
+        "-title",
+        NOTIFICATION_TITLE,
+        "-subtitle",
+        _notification_subtitle(notification),
+        "-message",
+        notification.body,
+        "-group",
+        notification.id,
+    ]
+    icon_path = _notification_icon_path()
+    if icon_path is not None:
+        command.extend(["-appIcon", str(icon_path)])
+
+    subprocess.run(command, check=True)
+
+
+def _send_osascript_notification(notification: ChangeNotification) -> None:
     subprocess.run(
         [
             "osascript",
@@ -56,7 +120,8 @@ def send_macos_notification(notification: ChangeNotification) -> None:
             (
                 "display notification "
                 f"{_applescript_string(notification.body)} "
-                f"with title {_applescript_string(notification.title)}"
+                f"with title {_applescript_string(NOTIFICATION_TITLE)} "
+                f"subtitle {_applescript_string(_notification_subtitle(notification))}"
             ),
         ],
         check=True,
@@ -181,3 +246,42 @@ def _format_value(value: object) -> str:
 
 def _applescript_string(value: str) -> str:
     return json.dumps(value)
+
+
+def _native_notifier_executable() -> Path | None:
+    app_path = _native_notifier_app_path()
+    if app_path is None:
+        return None
+    executable = app_path / "Contents" / "MacOS" / "VUT Studis Notifier"
+    return executable if executable.exists() else None
+
+
+def _native_notifier_app_path() -> Path | None:
+    configured_app_path = os.environ.get("VUT_NOTIFIER_APP_PATH")
+    candidates = [
+        Path(configured_app_path).expanduser() if configured_app_path else None,
+        Path.home() / "Applications" / "VUT Studis Notifier.app",
+        _project_root() / "build" / "VUT Studis Notifier.app",
+    ]
+    for app_path in candidates:
+        if app_path is not None and app_path.exists():
+            return app_path
+    return None
+
+
+def _notification_subtitle(notification: ChangeNotification) -> str:
+    return notification.title.removeprefix("VUT: ").strip()
+
+
+def _project_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _notification_icon_path() -> Path | None:
+    path = (
+        _project_root()
+        / "raycast-extension"
+        / "assets"
+        / "extension-icon.png"
+    )
+    return path if path.exists() else None

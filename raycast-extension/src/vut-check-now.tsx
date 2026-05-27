@@ -18,14 +18,21 @@ import asyncio
 import json
 
 from vut_studis.client import StudisClient
+from vut_studis.notifications import send_macos_notification
 
 async def main():
-    result = await StudisClient().get_change_notifications(
+    client = StudisClient()
+    result = await client.get_change_notifications(
         mode="fast",
         force_refresh=True,
         private=False,
-        mark_delivered=True,
+        mark_delivered=False,
     )
+    delivered_ids = []
+    for notification in result.notifications:
+        send_macos_notification(notification)
+        delivered_ids.append(notification.id)
+    client.record_change_notifications_delivered(delivered_ids)
     print(json.dumps(result.model_dump(mode="json"), ensure_ascii=False))
 
 asyncio.run(main())
