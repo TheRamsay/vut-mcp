@@ -30,6 +30,11 @@ from vut_studis.change_detection import (
     model_change_resource,
 )
 from vut_studis.config import ENV_PATH, Settings, load_settings, set_env_value
+from vut_studis.constants import (
+    COURSE_DETAIL_CACHE_TTL,
+    ELECTRONIC_INDEX_PATH,
+    GRADES_CACHE_TTL,
+)
 from vut_studis.errors import StudisAuthError
 from vut_studis.models import (
     AssessmentEntry,
@@ -57,10 +62,6 @@ from vut_studis.parsers.assignments import (
 )
 from vut_studis.parsers.grades import parse_grades_html
 from vut_studis.parsers.terms import parse_course_terms_html
-
-ELECTRONIC_INDEX_PATH = "/studis/student.phtml?sn=el_index"
-GRADES_CACHE_TTL = timedelta(minutes=30)
-COURSE_DETAIL_CACHE_TTL = timedelta(minutes=30)
 
 
 class StudisClient:
@@ -92,25 +93,33 @@ class StudisClient:
         return response.text
 
     async def _get_response(self, path: str) -> httpx.Response:
-        return await self._get_response_with_auth_retry(path, did_refresh=False)
-
-    async def _get_response_with_auth_retry(
-        self,
-        path: str,
-        *,
-        did_refresh: bool,
-    ) -> httpx.Response:
         await self._ensure_session_cookie()
+        response = await self._request_authenticated(path)
+        if response is not None:
+            return response
+
+        if not self._can_refresh_session():
+            raise StudisAuthError(
+                "Studis session expired. Run `uv run vut-studis-debug login-refresh-session`."
+            )
+
+        await self._refresh_session_cookie()
+        response = await self._request_authenticated(path)
+        if response is None:
+            raise StudisAuthError(
+                "Studis session refresh succeeded, but the retry was not authenticated."
+            )
+
+        return response
+
+    async def _request_authenticated(self, path: str) -> httpx.Response | None:
         async with self._http_client() as client:
             response = await client.get(path)
             response.raise_for_status()
             try:
                 self._ensure_authenticated(response)
             except StudisAuthError:
-                if did_refresh or not self._can_refresh_session():
-                    raise
-                await self._refresh_session_cookie()
-                return await self._get_response_with_auth_retry(path, did_refresh=True)
+                return None
 
             return response
 

@@ -8,9 +8,8 @@ import httpx
 from selectolax.parser import HTMLParser
 
 from vut_studis.config import Settings, load_settings
+from vut_studis.constants import ELECTRONIC_INDEX_PATH
 from vut_studis.errors import StudisAuthError
-
-STUDIS_ENTRY_PATH = "/studis/student.phtml?sn=el_index"
 
 
 @dataclass(frozen=True)
@@ -120,7 +119,7 @@ def _parse_title(html: str) -> str | None:
 
 async def inspect_login_flow(settings: Settings | None = None) -> list[LoginPageSnapshot]:
     settings = settings or load_settings()
-    entry_url = urljoin(str(settings.base_url), STUDIS_ENTRY_PATH)
+    entry_url = urljoin(str(settings.base_url), ELECTRONIC_INDEX_PATH)
 
     async with httpx.AsyncClient(
         follow_redirects=True,
@@ -145,7 +144,7 @@ async def login_with_password(settings: Settings | None = None) -> LoginAttemptR
     if not settings.username or not settings.password:
         raise StudisAuthError("VUT_USERNAME and VUT_PASSWORD must be configured in .env.")
 
-    entry_url = urljoin(str(settings.base_url), STUDIS_ENTRY_PATH)
+    entry_url = urljoin(str(settings.base_url), ELECTRONIC_INDEX_PATH)
     async with httpx.AsyncClient(
         follow_redirects=True,
         timeout=settings.http_timeout_seconds,
