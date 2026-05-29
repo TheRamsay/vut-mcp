@@ -7,6 +7,7 @@ import {
   getPreferenceValues,
 } from "@raycast/api";
 import { useMemo } from "react";
+import { CourseDetail } from "./course-detail";
 import { type Preferences } from "./studis";
 import { useStudisData } from "./use-studis-data";
 
@@ -170,6 +171,16 @@ function ActionItem({
       actions={
         <ActionPanel>
           <ActionPanel.Section>
+            <Action.Push
+              title="Show Course Detail"
+              icon={Icon.Sidebar}
+              target={
+                <CourseDetail
+                  courseCode={action.course_code}
+                  fallbackTitle={`${action.course_code}: ${action.course_name ?? action.title}`}
+                />
+              }
+            />
             {action.detail_url ? (
               <Action.OpenInBrowser
                 title="Open in Studis"

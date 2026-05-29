@@ -1,5 +1,6 @@
 import { Action, ActionPanel, Color, Icon, List } from "@raycast/api";
 import { useCallback } from "react";
+import { CourseDetail } from "./course-detail";
 import { useStudisData } from "./use-studis-data";
 
 type Grade = {
@@ -142,6 +143,18 @@ function GradeItem({
       actions={
         <ActionPanel>
           <ActionPanel.Section>
+            {grade.course_code ? (
+              <Action.Push
+                title="Show Course Detail"
+                icon={Icon.Sidebar}
+                target={
+                  <CourseDetail
+                    courseCode={grade.course_code}
+                    fallbackTitle={`${code}: ${grade.course_name}`}
+                  />
+                }
+              />
+            ) : null}
             {grade.detail_url ? (
               <Action.OpenInBrowser
                 title="Open in Studis"

@@ -99,7 +99,8 @@ Commands:
 
 - `VUT Today`: pending actions grouped by severity.
 - `VUT Grades`: points, grades, credits, completion status, and `Open in Studis`
-  for course detail pages.
+  for course detail pages. Each course can open a rich Raycast detail with
+  assessment rows, terms, assignments, actions, and local notes.
 - `VUT Changes`: fast snapshot diff for courses and grades/points since the
   previous check.
 - `VUT Check Now`: no-view command that checks grade/point changes and shows a
