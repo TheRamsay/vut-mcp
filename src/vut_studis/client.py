@@ -54,6 +54,7 @@ from vut_studis.models import (
     CourseAssignments,
     CourseNote,
     CourseStatus,
+    CourseStatusMode,
     CourseTerms,
     DailyBriefing,
     DismissedAction,
@@ -354,33 +355,49 @@ class StudisClient:
         self,
         course_code: str,
         *,
+        mode: CourseStatusMode = CourseStatusMode.SUMMARY,
         horizon_days: int | None = 30,
         force_refresh: bool = False,
     ) -> CourseStatus:
+        mode = CourseStatusMode(mode)
         grades = await self.get_course_grades(course_code, force_refresh=force_refresh)
-        assessment = await self.get_course_assessment(course_code, force_refresh=force_refresh)
-        terms = await self.get_course_terms(course_code, force_refresh=force_refresh)
-        assignments = await self.get_course_assignments(course_code, force_refresh=force_refresh)
         now = datetime.now()
-        pending_actions = [
-            *pending_actions_from_terms(terms, now=now),
-            *pending_actions_from_assignments(assignments, now=now),
-            *pending_actions_from_assessment(assessment),
-        ]
-        pending_actions = filter_pending_actions_by_horizon(
-            pending_actions,
-            now=now,
-            horizon_days=horizon_days,
-        )
         course = course_from_grade(grades[0]) if grades else None
+        assessment = None
+        terms = None
+        assignments = None
+        pending_actions: list[PendingAction] = []
+        pending_actions_loaded = False
+
+        if mode == CourseStatusMode.FULL:
+            assessment = await self.get_course_assessment(course_code, force_refresh=force_refresh)
+            terms = await self.get_course_terms(course_code, force_refresh=force_refresh)
+            assignments = await self.get_course_assignments(
+                course_code,
+                force_refresh=force_refresh,
+            )
+            pending_actions = [
+                *pending_actions_from_terms(terms, now=now),
+                *pending_actions_from_assignments(assignments, now=now),
+                *pending_actions_from_assessment(assessment),
+            ]
+            pending_actions = filter_pending_actions_by_horizon(
+                pending_actions,
+                now=now,
+                horizon_days=horizon_days,
+            )
+            pending_actions_loaded = True
+
         return build_course_status(
             course_code=course_code,
+            mode=mode,
             course=course,
             grades=grades,
             assessment=assessment,
             terms=terms,
             assignments=assignments,
             pending_actions=pending_actions,
+            pending_actions_loaded=pending_actions_loaded,
             course_notes=self.get_course_notes(course_code),
             generated_at=now,
         )

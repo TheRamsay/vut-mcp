@@ -147,6 +147,7 @@ uv run vut-studis-debug notify-changes --mode fast
 uv run vut-studis-debug notify-changes --mode deep --private
 uv run vut-studis-debug grades
 uv run vut-studis-debug course-status FLP
+uv run vut-studis-debug course-status FLP --mode full
 uv run vut-studis-debug course-assessment FLP
 uv run vut-studis-debug course-terms FLP
 uv run vut-studis-debug course-assignments FLP

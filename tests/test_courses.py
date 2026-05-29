@@ -1,11 +1,16 @@
 from datetime import date, datetime
 
+import pytest
+
 from vut_studis.aggregates import (
     build_course_status,
     build_student_summary,
     course_codes_from_grades,
     course_from_grade,
 )
+from vut_studis.cache import CacheStore
+from vut_studis.client import StudisClient
+from vut_studis.config import Settings
 from vut_studis.models import (
     AssessmentItem,
     CompletionType,
@@ -14,6 +19,7 @@ from vut_studis.models import (
     CourseAssignments,
     CourseLanguage,
     CourseNote,
+    CourseStatusMode,
     CourseTerm,
     CourseTerms,
     CourseType,
@@ -117,6 +123,7 @@ def test_build_course_status_groups_course_context() -> None:
 
     status = build_course_status(
         course_code="ABC",
+        mode=CourseStatusMode.FULL,
         course=Course(code="ABC", name="Test Course", absolved=False),
         grades=[
             Grade(
@@ -143,6 +150,7 @@ def test_build_course_status_groups_course_context() -> None:
             assignments=[],
         ),
         pending_actions=[action],
+        pending_actions_loaded=True,
         course_notes=[
             CourseNote(
                 id="note-1",
@@ -156,7 +164,9 @@ def test_build_course_status_groups_course_context() -> None:
     )
 
     assert status.course_code == "ABC"
+    assert status.mode == CourseStatusMode.FULL
     assert status.course_name == "Test Course"
+    assert status.pending_actions_loaded is True
     assert status.pending_actions_count == 1
     assert status.critical_count == 1
     assert status.warning_count == 0
@@ -165,4 +175,42 @@ def test_build_course_status_groups_course_context() -> None:
         "Credit is not awarded yet.",
         "1 pending action(s); top priority: Project.",
         "1 local note(s) saved.",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_course_status_summary_does_not_fetch_course_detail(tmp_path, monkeypatch) -> None:
+    client = StudisClient(
+        Settings(
+            VUT_BASE_URL="https://www.vut.cz",
+            VUT_USERNAME="test-user",
+            VUT_SESSION_COOKIE="session=value",
+        ),
+        cache_store=CacheStore(path=tmp_path / "cache.sqlite3"),
+    )
+
+    async def fake_get_course_grades(course_code: str, *, force_refresh: bool = False):
+        assert course_code == "ABC"
+        return [Grade(course_code="ABC", course_name="Test Course", points=42)]
+
+    async def fail_detail_fetch(*_args, **_kwargs):
+        raise AssertionError("summary mode should not fetch course detail pages")
+
+    monkeypatch.setattr(client, "get_course_grades", fake_get_course_grades)
+    monkeypatch.setattr(client, "get_course_assessment", fail_detail_fetch)
+    monkeypatch.setattr(client, "get_course_terms", fail_detail_fetch)
+    monkeypatch.setattr(client, "get_course_assignments", fail_detail_fetch)
+
+    status = await client.get_course_status("ABC")
+
+    assert status.mode == CourseStatusMode.SUMMARY
+    assert status.course_name == "Test Course"
+    assert status.assessment is None
+    assert status.terms is None
+    assert status.assignments is None
+    assert status.pending_actions_loaded is False
+    assert status.pending_actions_count is None
+    assert status.summary == [
+        "ABC: 42 points.",
+        "Detailed course actions not loaded; request full mode for terms/minima.",
     ]

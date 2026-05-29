@@ -203,6 +203,11 @@ class GradeValue(StrEnum):
     F = "F"
 
 
+class CourseStatusMode(StrEnum):
+    SUMMARY = "summary"
+    FULL = "full"
+
+
 class Grade(StudisModel):
     course_code: str | None = None
     course_name: str
@@ -350,17 +355,19 @@ class CourseAssignments(StudisModel):
 
 
 class CourseStatus(StudisModel):
+    mode: CourseStatusMode
     generated_at: datetime
     course_code: str
     course_name: str | None = None
     course: Course | None = None
     grades: list[Grade] = Field(default_factory=list)
-    assessment: CourseAssessment
-    terms: CourseTerms
-    assignments: CourseAssignments
+    assessment: CourseAssessment | None = None
+    terms: CourseTerms | None = None
+    assignments: CourseAssignments | None = None
     pending_actions: list[PendingAction] = Field(default_factory=list)
     course_notes: list[CourseNote] = Field(default_factory=list)
-    pending_actions_count: int
+    pending_actions_loaded: bool = False
+    pending_actions_count: int | None = None
     critical_count: int = 0
     warning_count: int = 0
     info_count: int = 0

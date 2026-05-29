@@ -126,12 +126,16 @@ async def vut_get_course_points(course_code: str, force_refresh: bool = False):
 @mcp.tool()
 async def vut_get_course_status(
     course_code: str,
+    mode: str = "summary",
     horizon_days: int | None = 30,
     force_refresh: bool = False,
 ):
-    """Use for 'how am I doing in X?': points/grade, minima, terms, assignments, actions, notes."""
+    """Use for 'how am I doing in X?'. Default summary is cheap; use mode=full for details."""
+    if mode not in {"summary", "full"}:
+        raise ValueError("mode must be 'summary' or 'full'")
     return await get_studis_client().get_course_status(
         course_code,
+        mode=mode,
         horizon_days=horizon_days,
         force_refresh=force_refresh,
     )

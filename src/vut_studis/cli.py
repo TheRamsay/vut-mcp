@@ -230,6 +230,10 @@ def grades(
 @app.command("course-status")
 def course_status(
     course_code: str,
+    mode: Annotated[
+        str,
+        typer.Option("--mode", help="summary is cheap; full fetches course detail pages."),
+    ] = "summary",
     horizon_days: Annotated[
         int | None,
         typer.Option("--horizon-days", help="Only include actions due within this many days."),
@@ -240,9 +244,12 @@ def course_status(
     ] = False,
 ) -> None:
     """Fetch the high-level status for one course."""
+    if mode not in {"summary", "full"}:
+        raise typer.BadParameter("mode must be 'summary' or 'full'")
     status = asyncio.run(
         StudisClient().get_course_status(
             course_code,
+            mode=mode,
             horizon_days=horizon_days,
             force_refresh=live,
         )

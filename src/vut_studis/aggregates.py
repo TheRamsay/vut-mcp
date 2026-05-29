@@ -9,6 +9,7 @@ from vut_studis.models import (
     CourseAssignments,
     CourseNote,
     CourseStatus,
+    CourseStatusMode,
     CourseTerms,
     Grade,
     PendingAction,
@@ -272,17 +273,20 @@ def filter_pending_actions_by_horizon(
 def build_course_status(
     *,
     course_code: str,
+    mode: CourseStatusMode,
     course: Course | None,
     grades: list[Grade],
-    assessment: CourseAssessment,
-    terms: CourseTerms,
-    assignments: CourseAssignments,
+    assessment: CourseAssessment | None,
+    terms: CourseTerms | None,
+    assignments: CourseAssignments | None,
     pending_actions: list[PendingAction],
+    pending_actions_loaded: bool,
     course_notes: list[CourseNote],
     generated_at: datetime,
 ) -> CourseStatus:
     sorted_actions = sorted(pending_actions, key=pending_action_sort_key)
     return CourseStatus(
+        mode=mode,
         generated_at=generated_at,
         course_code=course_code,
         course_name=_course_name(course=course, assessment=assessment, grades=grades),
@@ -293,14 +297,17 @@ def build_course_status(
         assignments=assignments,
         pending_actions=sorted_actions,
         course_notes=course_notes,
-        pending_actions_count=len(sorted_actions),
+        pending_actions_loaded=pending_actions_loaded,
+        pending_actions_count=len(sorted_actions) if pending_actions_loaded else None,
         critical_count=_count_severity(sorted_actions, PendingActionSeverity.CRITICAL),
         warning_count=_count_severity(sorted_actions, PendingActionSeverity.WARNING),
         info_count=_count_severity(sorted_actions, PendingActionSeverity.INFO),
         summary=_course_status_summary(
             course_code=course_code,
+            mode=mode,
             grades=grades,
             pending_actions=sorted_actions,
+            pending_actions_loaded=pending_actions_loaded,
             course_notes=course_notes,
         ),
     )
@@ -326,12 +333,12 @@ def _days_until(deadline: datetime | None, now: datetime) -> int | None:
 def _course_name(
     *,
     course: Course | None,
-    assessment: CourseAssessment,
+    assessment: CourseAssessment | None,
     grades: list[Grade],
 ) -> str | None:
     if course is not None:
         return course.name
-    if assessment.course_name:
+    if assessment is not None and assessment.course_name:
         return assessment.course_name
     if grades:
         return grades[0].course_name
@@ -345,8 +352,10 @@ def _count_severity(actions: list[PendingAction], severity: PendingActionSeverit
 def _course_status_summary(
     *,
     course_code: str,
+    mode: CourseStatusMode,
     grades: list[Grade],
     pending_actions: list[PendingAction],
+    pending_actions_loaded: bool,
     course_notes: list[CourseNote],
 ) -> list[str]:
     summary: list[str] = []
@@ -367,8 +376,10 @@ def _course_status_summary(
         summary.append(
             f"{len(pending_actions)} pending action(s); top priority: {first.title}."
         )
-    else:
+    elif pending_actions_loaded:
         summary.append("No pending actions found for this course.")
+    elif mode == CourseStatusMode.SUMMARY:
+        summary.append("Detailed course actions not loaded; request full mode for terms/minima.")
 
     if course_notes:
         summary.append(f"{len(course_notes)} local note(s) saved.")
