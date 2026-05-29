@@ -227,6 +227,29 @@ def grades(
     console.print([grade.model_dump(mode="json") for grade in grades_result])
 
 
+@app.command("course-status")
+def course_status(
+    course_code: str,
+    horizon_days: Annotated[
+        int | None,
+        typer.Option("--horizon-days", help="Only include actions due within this many days."),
+    ] = 30,
+    live: Annotated[
+        bool,
+        typer.Option("--live", help="Bypass the local cache and fetch from Studis."),
+    ] = False,
+) -> None:
+    """Fetch the high-level status for one course."""
+    status = asyncio.run(
+        StudisClient().get_course_status(
+            course_code,
+            horizon_days=horizon_days,
+            force_refresh=live,
+        )
+    )
+    console.print(status.model_dump(mode="json"))
+
+
 @app.command("course-assessment")
 def course_assessment(
     course_code: str,

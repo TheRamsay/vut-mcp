@@ -1,16 +1,24 @@
-from datetime import date
+from datetime import date, datetime
 
 from vut_studis.aggregates import (
+    build_course_status,
     build_student_summary,
     course_codes_from_grades,
     course_from_grade,
 )
 from vut_studis.models import (
+    AssessmentItem,
     CompletionType,
     Course,
+    CourseAssessment,
+    CourseAssignments,
     CourseLanguage,
+    CourseNote,
+    CourseTerm,
+    CourseTerms,
     CourseType,
     Grade,
+    GradeValue,
     PendingAction,
     PendingActionKind,
     PendingActionSeverity,
@@ -93,3 +101,68 @@ def test_build_student_summary_counts_courses_and_latest_grades() -> None:
     assert summary.latest_grades[0].course_code == "DEF"
     assert summary.upcoming_classes == []
     assert summary.upcoming_exams == []
+
+
+def test_build_course_status_groups_course_context() -> None:
+    generated_at = datetime(2026, 5, 29, 9, 0)
+    action = PendingAction(
+        type=PendingActionType.UNMET_MINIMUM,
+        severity=PendingActionSeverity.CRITICAL,
+        action_kind=PendingActionKind.CHECK_POINTS,
+        course_code="ABC",
+        title="Project",
+        reason="Minimum is not met.",
+        suggested_next_step="Check remaining assessment opportunities.",
+    )
+
+    status = build_course_status(
+        course_code="ABC",
+        course=Course(code="ABC", name="Test Course", absolved=False),
+        grades=[
+            Grade(
+                course_code="ABC",
+                course_name="Test Course",
+                points=12,
+                grade=GradeValue.C,
+                credit_awarded=False,
+            )
+        ],
+        assessment=CourseAssessment(
+            course_code="ABC",
+            course_name="Test Course",
+            items=[AssessmentItem(name="Project", min_points=15, points=12)],
+        ),
+        terms=CourseTerms(
+            course_code="ABC",
+            course_name="Test Course",
+            terms=[CourseTerm(name="1. termín")],
+        ),
+        assignments=CourseAssignments(
+            course_code="ABC",
+            course_name="Test Course",
+            assignments=[],
+        ),
+        pending_actions=[action],
+        course_notes=[
+            CourseNote(
+                id="note-1",
+                course_code="ABC",
+                body="Ask about project repair.",
+                created_at=generated_at,
+                updated_at=generated_at,
+            )
+        ],
+        generated_at=generated_at,
+    )
+
+    assert status.course_code == "ABC"
+    assert status.course_name == "Test Course"
+    assert status.pending_actions_count == 1
+    assert status.critical_count == 1
+    assert status.warning_count == 0
+    assert status.summary == [
+        "ABC: 12 points, grade C.",
+        "Credit is not awarded yet.",
+        "1 pending action(s); top priority: Project.",
+        "1 local note(s) saved.",
+    ]

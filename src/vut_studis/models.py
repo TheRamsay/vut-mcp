@@ -349,6 +349,24 @@ class CourseAssignments(StudisModel):
     assignments: list[CourseAssignment]
 
 
+class CourseStatus(StudisModel):
+    generated_at: datetime
+    course_code: str
+    course_name: str | None = None
+    course: Course | None = None
+    grades: list[Grade] = Field(default_factory=list)
+    assessment: CourseAssessment
+    terms: CourseTerms
+    assignments: CourseAssignments
+    pending_actions: list[PendingAction] = Field(default_factory=list)
+    course_notes: list[CourseNote] = Field(default_factory=list)
+    pending_actions_count: int
+    critical_count: int = 0
+    warning_count: int = 0
+    info_count: int = 0
+    summary: list[str] = Field(default_factory=list)
+
+
 class StudentSummary(StudisModel):
     courses_count: int
     active_courses_count: int

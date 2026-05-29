@@ -72,6 +72,7 @@ Current tools:
 - `vut_get_courses`
 - `vut_get_grades`
 - `vut_get_course_points`
+- `vut_get_course_status`
 - `vut_get_course_assessment`
 - `vut_get_course_terms`
 - `vut_get_course_assignments`
@@ -145,6 +146,7 @@ uv run vut-studis-debug recent-changes --no-pending-actions
 uv run vut-studis-debug notify-changes --mode fast
 uv run vut-studis-debug notify-changes --mode deep --private
 uv run vut-studis-debug grades
+uv run vut-studis-debug course-status FLP
 uv run vut-studis-debug course-assessment FLP
 uv run vut-studis-debug course-terms FLP
 uv run vut-studis-debug course-assignments FLP

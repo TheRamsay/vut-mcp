@@ -8,8 +8,10 @@ import httpx
 from pydantic import BaseModel
 
 from vut_studis.aggregates import (
+    build_course_status,
     build_student_summary,
     course_codes_from_grades,
+    course_from_grade,
     courses_from_grades,
     filter_pending_actions_by_horizon,
     find_assessment_message_target,
@@ -51,6 +53,7 @@ from vut_studis.models import (
     CourseAssessment,
     CourseAssignments,
     CourseNote,
+    CourseStatus,
     CourseTerms,
     DailyBriefing,
     DismissedAction,
@@ -346,6 +349,41 @@ class StudisClient:
             )
 
         return assignments.model_copy(update={"assignments": enriched})
+
+    async def get_course_status(
+        self,
+        course_code: str,
+        *,
+        horizon_days: int | None = 30,
+        force_refresh: bool = False,
+    ) -> CourseStatus:
+        grades = await self.get_course_grades(course_code, force_refresh=force_refresh)
+        assessment = await self.get_course_assessment(course_code, force_refresh=force_refresh)
+        terms = await self.get_course_terms(course_code, force_refresh=force_refresh)
+        assignments = await self.get_course_assignments(course_code, force_refresh=force_refresh)
+        now = datetime.now()
+        pending_actions = [
+            *pending_actions_from_terms(terms, now=now),
+            *pending_actions_from_assignments(assignments, now=now),
+            *pending_actions_from_assessment(assessment),
+        ]
+        pending_actions = filter_pending_actions_by_horizon(
+            pending_actions,
+            now=now,
+            horizon_days=horizon_days,
+        )
+        course = course_from_grade(grades[0]) if grades else None
+        return build_course_status(
+            course_code=course_code,
+            course=course,
+            grades=grades,
+            assessment=assessment,
+            terms=terms,
+            assignments=assignments,
+            pending_actions=pending_actions,
+            course_notes=self.get_course_notes(course_code),
+            generated_at=now,
+        )
 
     async def _get_cached_course_detail[M: BaseModel](
         self,

@@ -7,6 +7,8 @@ from vut_studis.models import (
     Course,
     CourseAssessment,
     CourseAssignments,
+    CourseNote,
+    CourseStatus,
     CourseTerms,
     Grade,
     PendingAction,
@@ -267,6 +269,43 @@ def filter_pending_actions_by_horizon(
     return filtered
 
 
+def build_course_status(
+    *,
+    course_code: str,
+    course: Course | None,
+    grades: list[Grade],
+    assessment: CourseAssessment,
+    terms: CourseTerms,
+    assignments: CourseAssignments,
+    pending_actions: list[PendingAction],
+    course_notes: list[CourseNote],
+    generated_at: datetime,
+) -> CourseStatus:
+    sorted_actions = sorted(pending_actions, key=pending_action_sort_key)
+    return CourseStatus(
+        generated_at=generated_at,
+        course_code=course_code,
+        course_name=_course_name(course=course, assessment=assessment, grades=grades),
+        course=course,
+        grades=grades,
+        assessment=assessment,
+        terms=terms,
+        assignments=assignments,
+        pending_actions=sorted_actions,
+        course_notes=course_notes,
+        pending_actions_count=len(sorted_actions),
+        critical_count=_count_severity(sorted_actions, PendingActionSeverity.CRITICAL),
+        warning_count=_count_severity(sorted_actions, PendingActionSeverity.WARNING),
+        info_count=_count_severity(sorted_actions, PendingActionSeverity.INFO),
+        summary=_course_status_summary(
+            course_code=course_code,
+            grades=grades,
+            pending_actions=sorted_actions,
+            course_notes=course_notes,
+        ),
+    )
+
+
 def _deadline_severity(deadline: datetime | None, now: datetime) -> PendingActionSeverity:
     days_left = _days_until(deadline, now)
     if days_left is None:
@@ -282,6 +321,69 @@ def _days_until(deadline: datetime | None, now: datetime) -> int | None:
     if deadline is None:
         return None
     return (deadline.date() - now.date()).days
+
+
+def _course_name(
+    *,
+    course: Course | None,
+    assessment: CourseAssessment,
+    grades: list[Grade],
+) -> str | None:
+    if course is not None:
+        return course.name
+    if assessment.course_name:
+        return assessment.course_name
+    if grades:
+        return grades[0].course_name
+    return None
+
+
+def _count_severity(actions: list[PendingAction], severity: PendingActionSeverity) -> int:
+    return sum(1 for action in actions if action.severity == severity)
+
+
+def _course_status_summary(
+    *,
+    course_code: str,
+    grades: list[Grade],
+    pending_actions: list[PendingAction],
+    course_notes: list[CourseNote],
+) -> list[str]:
+    summary: list[str] = []
+    grade = _primary_grade(grades)
+    if grade is not None:
+        points = f"{grade.points:g} points" if grade.points is not None else "points unknown"
+        grade_value = f", grade {grade.grade}" if grade.grade is not None else ""
+        summary.append(f"{course_code}: {points}{grade_value}.")
+        if grade.credit_awarded is True:
+            summary.append("Credit is awarded.")
+        elif grade.credit_awarded is False:
+            summary.append("Credit is not awarded yet.")
+        if grade.absolved is True:
+            summary.append("Course is completed.")
+
+    if pending_actions:
+        first = pending_actions[0]
+        summary.append(
+            f"{len(pending_actions)} pending action(s); top priority: {first.title}."
+        )
+    else:
+        summary.append("No pending actions found for this course.")
+
+    if course_notes:
+        summary.append(f"{len(course_notes)} local note(s) saved.")
+
+    return summary
+
+
+def _primary_grade(grades: list[Grade]) -> Grade | None:
+    if not grades:
+        return None
+    return sorted(
+        grades,
+        key=lambda grade: grade.grade_awarded_on or grade.credit_awarded_on or date.min,
+        reverse=True,
+    )[0]
 
 
 def find_assessment_message_target(

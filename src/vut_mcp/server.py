@@ -12,13 +12,13 @@ mcp = FastMCP("VUT Studis")
 
 @mcp.tool()
 async def vut_get_schedule(date_from: date | None = None, date_to: date | None = None):
-    """Get the student's VUT Studis schedule."""
+    """Get Studis schedule items. Currently not implemented; prefer other tools for now."""
     return await get_studis_client().get_schedule(date_from=date_from, date_to=date_to)
 
 
 @mcp.tool()
 async def vut_get_student_summary(force_refresh: bool = False):
-    """Get a compact summary of the student's current Studis state."""
+    """Use for a compact student overview: courses, credits, recent grades, and top actions."""
     return await get_studis_client().get_student_summary(force_refresh=force_refresh)
 
 
@@ -28,7 +28,7 @@ async def vut_get_daily_briefing(
     force_refresh: bool = False,
     include_changes: bool = True,
 ):
-    """Get a daily assistant briefing with pending actions, changes, and local notes."""
+    """Use first for planning: what needs attention today/soon, recent changes, and local notes."""
     return await get_studis_client().get_daily_briefing(
         horizon_days=horizon_days,
         force_refresh=force_refresh,
@@ -38,19 +38,19 @@ async def vut_get_daily_briefing(
 
 @mcp.tool()
 async def vut_dismiss_briefing_item(action_id: str, reason: str | None = None):
-    """Dismiss a briefing item in local memory."""
+    """Use when the user asks to hide/ignore a briefing item in local memory."""
     return get_studis_client().dismiss_briefing_item(action_id, reason=reason)
 
 
 @mcp.tool()
 async def vut_add_course_note(course_code: str, body: str):
-    """Add a local personal note for a VUT course."""
+    """Use when the user asks to remember a personal note for a course."""
     return get_studis_client().add_course_note(course_code, body)
 
 
 @mcp.tool()
 async def vut_get_course_notes(course_code: str | None = None):
-    """Get local personal notes for VUT courses."""
+    """Use to recall local personal notes; optionally limit to one course code."""
     return get_studis_client().get_course_notes(course_code)
 
 
@@ -60,7 +60,7 @@ async def vut_get_pending_actions(
     horizon_days: int | None = None,
     force_refresh: bool = False,
 ):
-    """Get pending registrations, deadlines, upcoming terms, and unmet point minima."""
+    """Use for actionable tasks: open registrations, deadlines, upcoming terms, and unmet minima."""
     return await get_studis_client().get_pending_actions(
         course_codes=course_codes,
         horizon_days=horizon_days,
@@ -73,7 +73,7 @@ async def vut_get_recent_changes(
     force_refresh: bool = True,
     include_pending_actions: bool = True,
 ):
-    """Detect what changed in Studis since the previous snapshot."""
+    """Use when the user asks what changed since the previous local snapshot."""
     return await get_studis_client().get_recent_changes(
         force_refresh=force_refresh,
         include_pending_actions=include_pending_actions,
@@ -87,7 +87,7 @@ async def vut_get_change_notifications(
     private: bool = False,
     mark_delivered: bool = False,
 ):
-    """Get notifiable Studis changes without sending desktop notifications."""
+    """Use for assistant-facing change alerts: new/changed grades, points, courses, or actions."""
     if mode not in {"fast", "deep"}:
         raise ValueError("mode must be 'fast' or 'deep'")
     return await get_studis_client().get_change_notifications(
@@ -100,13 +100,13 @@ async def vut_get_change_notifications(
 
 @mcp.tool()
 async def vut_get_courses(force_refresh: bool = False):
-    """Get courses from the student's VUT Studis electronic index."""
+    """Use for the course list only. Prefer higher-level tools for planning or course health."""
     return await get_studis_client().get_courses(force_refresh=force_refresh)
 
 
 @mcp.tool()
 async def vut_get_grades(course_code: str | None = None, force_refresh: bool = False):
-    """Get grades and points from the student's VUT Studis electronic index."""
+    """Use for grades/points overview. For one course, prefer vut_get_course_status."""
     client = get_studis_client()
     if course_code:
         return await client.get_course_grades(course_code, force_refresh=force_refresh)
@@ -115,7 +115,7 @@ async def vut_get_grades(course_code: str | None = None, force_refresh: bool = F
 
 @mcp.tool()
 async def vut_get_course_points(course_code: str, force_refresh: bool = False):
-    """Get points for a specific course code from the VUT Studis electronic index."""
+    """Use for a narrow total-points answer. Prefer vut_get_course_status for context."""
     grades = await get_studis_client().get_course_grades(
         course_code,
         force_refresh=force_refresh,
@@ -124,8 +124,22 @@ async def vut_get_course_points(course_code: str, force_refresh: bool = False):
 
 
 @mcp.tool()
+async def vut_get_course_status(
+    course_code: str,
+    horizon_days: int | None = 30,
+    force_refresh: bool = False,
+):
+    """Use for 'how am I doing in X?': points/grade, minima, terms, assignments, actions, notes."""
+    return await get_studis_client().get_course_status(
+        course_code,
+        horizon_days=horizon_days,
+        force_refresh=force_refresh,
+    )
+
+
+@mcp.tool()
 async def vut_get_course_assessment(course_code: str, force_refresh: bool = False):
-    """Get assessment rules, minimum points, and maximum points for a VUT course."""
+    """Use after vut_get_course_status for detailed assessment rows or minima."""
     return await get_studis_client().get_course_assessment(
         course_code,
         force_refresh=force_refresh,
@@ -139,7 +153,7 @@ async def vut_get_assessment_message(
     entry_order: int | None = None,
     force_refresh: bool = False,
 ):
-    """Get a structured teacher message attached to a VUT course assessment row."""
+    """Use only when explicitly asked for a teacher assessment message/comment; may be private."""
     return await get_studis_client().get_assessment_message(
         course_code,
         item_order,
@@ -150,13 +164,13 @@ async def vut_get_assessment_message(
 
 @mcp.tool()
 async def vut_get_course_terms(course_code: str, force_refresh: bool = False):
-    """Get exam/credit terms, registration status, capacity, and points for a VUT course."""
+    """Use for detailed exam/credit term registration, capacity, timing, and earned points."""
     return await get_studis_client().get_course_terms(course_code, force_refresh=force_refresh)
 
 
 @mcp.tool()
 async def vut_get_course_assignments(course_code: str, force_refresh: bool = False):
-    """Get assignments, registration status, deadlines, and submitted files for a VUT course."""
+    """Use for assignment deadlines, registration/submission status, and submitted files."""
     return await get_studis_client().get_course_assignments(
         course_code,
         force_refresh=force_refresh,
