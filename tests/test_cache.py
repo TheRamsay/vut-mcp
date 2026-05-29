@@ -183,6 +183,50 @@ def test_delivered_notification_dedupe(tmp_path) -> None:
     assert store.status().delivered_notifications == 1
 
 
+def test_dismissed_actions_are_scoped_and_deduped(tmp_path) -> None:
+    store = CacheStore(tmp_path / "cache.sqlite3")
+    dismissed_at = datetime(2026, 5, 29, 8, 0, tzinfo=UTC)
+
+    dismissed = store.dismiss_action(
+        scope="test",
+        action_id="action-1",
+        reason="not relevant",
+        dismissed_at=dismissed_at,
+    )
+    store.dismiss_action(scope="other", action_id="action-2", dismissed_at=dismissed_at)
+
+    assert dismissed.action_id == "action-1"
+    assert store.get_dismissed_action_ids(
+        scope="test",
+        action_ids=["action-1", "action-2"],
+    ) == {"action-1"}
+
+
+def test_course_notes_are_scoped_and_filterable(tmp_path) -> None:
+    store = CacheStore(tmp_path / "cache.sqlite3")
+    created_at = datetime(2026, 5, 29, 8, 0, tzinfo=UTC)
+
+    store.add_course_note(
+        scope="test",
+        note_id="note-1",
+        course_code="flp",
+        body="Check exam registration.",
+        created_at=created_at,
+    )
+    store.add_course_note(
+        scope="test",
+        note_id="note-2",
+        course_code="SUR",
+        body="Read Moodle.",
+        created_at=created_at + timedelta(minutes=1),
+    )
+
+    assert [note.course_code for note in store.list_course_notes(scope="test")] == ["SUR", "FLP"]
+    assert [note.body for note in store.list_course_notes(scope="test", course_code="FLP")] == [
+        "Check exam registration."
+    ]
+
+
 def test_empty_cache_path_uses_default() -> None:
     settings = Settings(VUT_BASE_URL="https://www.vut.cz", VUT_CACHE_PATH="")
 

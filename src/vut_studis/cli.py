@@ -27,6 +27,59 @@ def summary(
     console.print(result.model_dump(mode="json"))
 
 
+@app.command("daily-briefing")
+def daily_briefing(
+    horizon_days: Annotated[
+        int,
+        typer.Option("--horizon-days", help="Only include actions due within this many days."),
+    ] = 7,
+    live: Annotated[
+        bool,
+        typer.Option("--live", help="Bypass the local cache and fetch from Studis."),
+    ] = False,
+    include_changes: Annotated[
+        bool,
+        typer.Option("--changes/--no-changes", help="Include recent grade/course changes."),
+    ] = True,
+) -> None:
+    """Fetch the daily assistant briefing."""
+    result = asyncio.run(
+        StudisClient().get_daily_briefing(
+            horizon_days=horizon_days,
+            force_refresh=live,
+            include_changes=include_changes,
+        )
+    )
+    console.print(result.model_dump(mode="json"))
+
+
+@app.command("dismiss-briefing-item")
+def dismiss_briefing_item(
+    action_id: str,
+    reason: Annotated[
+        str | None,
+        typer.Option("--reason", help="Optional reason for dismissing the item."),
+    ] = None,
+) -> None:
+    """Dismiss a briefing item in local memory."""
+    result = StudisClient().dismiss_briefing_item(action_id, reason=reason)
+    console.print(result.model_dump(mode="json"))
+
+
+@app.command("course-note-add")
+def course_note_add(course_code: str, body: str) -> None:
+    """Add a local personal note for a course."""
+    result = StudisClient().add_course_note(course_code, body)
+    console.print(result.model_dump(mode="json"))
+
+
+@app.command("course-notes")
+def course_notes(course_code: str | None = None) -> None:
+    """List local personal course notes."""
+    result = StudisClient().get_course_notes(course_code)
+    console.print([note.model_dump(mode="json") for note in result])
+
+
 @app.command()
 def schedule(
     date_from: Annotated[str | None, typer.Option("--from", help="Start date, YYYY-MM-DD.")] = None,
@@ -252,6 +305,8 @@ def cache_status() -> None:
             "expired_entries": status.expired_entries,
             "state_snapshots": status.state_snapshots,
             "delivered_notifications": status.delivered_notifications,
+            "dismissed_actions": status.dismissed_actions,
+            "course_notes": status.course_notes,
             "size_bytes": status.size_bytes,
         }
     )

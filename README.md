@@ -13,6 +13,8 @@ ships a native Raycast extension for quick daily use.
 - Builds pending actions for missed registrations, upcoming terms, assignment
   deadlines, and unmet point minima.
 - Records local snapshots and reports what changed since the previous check.
+- Builds a daily briefing and stores local memory such as dismissed briefing
+  items and personal course notes.
 - Keeps data local; credentials, cookies, and cache files are ignored by git.
 
 ## Architecture
@@ -60,6 +62,10 @@ uv run vut-mcp
 Current tools:
 
 - `vut_get_student_summary`
+- `vut_get_daily_briefing`
+- `vut_dismiss_briefing_item`
+- `vut_add_course_note`
+- `vut_get_course_notes`
 - `vut_get_pending_actions`
 - `vut_get_recent_changes`
 - `vut_get_change_notifications`
@@ -129,6 +135,10 @@ Use the CLI to inspect data without MCP or Raycast:
 
 ```bash
 uv run vut-studis-debug summary
+uv run vut-studis-debug daily-briefing --horizon-days 7
+uv run vut-studis-debug dismiss-briefing-item pending:abc123 --reason "handled"
+uv run vut-studis-debug course-note-add FLP "Check exam registration."
+uv run vut-studis-debug course-notes FLP
 uv run vut-studis-debug pending-actions --horizon-days 14
 uv run vut-studis-debug recent-changes
 uv run vut-studis-debug recent-changes --no-pending-actions

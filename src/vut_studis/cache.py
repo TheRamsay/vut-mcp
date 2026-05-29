@@ -37,6 +37,8 @@ class CacheStatus:
     expired_entries: int
     state_snapshots: int
     delivered_notifications: int
+    dismissed_actions: int
+    course_notes: int
     size_bytes: int
 
 
@@ -55,6 +57,22 @@ class StateSnapshot:
     payload_hash: str | None
     captured_at: datetime
     is_deleted: bool
+
+
+@dataclass(frozen=True)
+class StoredCourseNote:
+    note_id: str
+    course_code: str
+    body: str
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class StoredDismissedAction:
+    action_id: str
+    reason: str | None
+    dismissed_at: datetime
 
 
 class CacheStore:
@@ -124,6 +142,10 @@ class CacheStore:
             cursor = connection.execute("DELETE FROM state_snapshots")
             removed += cursor.rowcount
             cursor = connection.execute("DELETE FROM delivered_notifications")
+            removed += cursor.rowcount
+            cursor = connection.execute("DELETE FROM dismissed_actions")
+            removed += cursor.rowcount
+            cursor = connection.execute("DELETE FROM course_notes")
             return removed + cursor.rowcount
 
     def delete(self, key: str) -> None:
@@ -265,6 +287,160 @@ class CacheStore:
                 ],
             )
 
+    def dismiss_action(
+        self,
+        *,
+        scope: str,
+        action_id: str,
+        reason: str | None = None,
+        dismissed_at: datetime | None = None,
+    ) -> StoredDismissedAction:
+        dismissed_at = dismissed_at or _utc_now()
+        if self.disabled:
+            return StoredDismissedAction(
+                action_id=action_id,
+                reason=reason,
+                dismissed_at=dismissed_at,
+            )
+
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self._connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO dismissed_actions (
+                    scope,
+                    action_id,
+                    reason,
+                    dismissed_at
+                )
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(scope, action_id) DO UPDATE SET
+                    reason = excluded.reason,
+                    dismissed_at = excluded.dismissed_at
+                """,
+                (scope, action_id, reason, _to_iso(dismissed_at)),
+            )
+
+        return StoredDismissedAction(
+            action_id=action_id,
+            reason=reason,
+            dismissed_at=dismissed_at,
+        )
+
+    def get_dismissed_action_ids(
+        self,
+        *,
+        scope: str,
+        action_ids: Sequence[str],
+    ) -> set[str]:
+        if self.disabled or not self.path.exists() or not action_ids:
+            return set()
+
+        placeholders = ",".join("?" for _ in action_ids)
+        with self._connection() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT action_id
+                FROM dismissed_actions
+                WHERE scope = ? AND action_id IN ({placeholders})
+                """,
+                (scope, *action_ids),
+            ).fetchall()
+
+        return {str(row["action_id"]) for row in rows}
+
+    def add_course_note(
+        self,
+        *,
+        scope: str,
+        note_id: str,
+        course_code: str,
+        body: str,
+        created_at: datetime | None = None,
+    ) -> StoredCourseNote:
+        created_at = created_at or _utc_now()
+        if self.disabled:
+            return StoredCourseNote(
+                note_id=note_id,
+                course_code=course_code,
+                body=body,
+                created_at=created_at,
+                updated_at=created_at,
+            )
+
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        normalized_code = course_code.upper()
+        with self._connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO course_notes (
+                    scope,
+                    note_id,
+                    course_code,
+                    body,
+                    created_at,
+                    updated_at,
+                    archived
+                )
+                VALUES (?, ?, ?, ?, ?, ?, 0)
+                """,
+                (
+                    scope,
+                    note_id,
+                    normalized_code,
+                    body,
+                    _to_iso(created_at),
+                    _to_iso(created_at),
+                ),
+            )
+
+        return StoredCourseNote(
+            note_id=note_id,
+            course_code=normalized_code,
+            body=body,
+            created_at=created_at,
+            updated_at=created_at,
+        )
+
+    def list_course_notes(
+        self,
+        *,
+        scope: str,
+        course_code: str | None = None,
+    ) -> list[StoredCourseNote]:
+        if self.disabled or not self.path.exists():
+            return []
+
+        parameters: tuple[str, ...]
+        if course_code is None:
+            where = "scope = ? AND archived = 0"
+            parameters = (scope,)
+        else:
+            where = "scope = ? AND course_code = ? AND archived = 0"
+            parameters = (scope, course_code.upper())
+
+        with self._connection() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT note_id, course_code, body, created_at, updated_at
+                FROM course_notes
+                WHERE {where}
+                ORDER BY updated_at DESC, created_at DESC
+                """,
+                parameters,
+            ).fetchall()
+
+        return [
+            StoredCourseNote(
+                note_id=row["note_id"],
+                course_code=row["course_code"],
+                body=row["body"],
+                created_at=_from_iso(row["created_at"]),
+                updated_at=_from_iso(row["updated_at"]),
+            )
+            for row in rows
+        ]
+
     def status(self) -> CacheStatus:
         if self.disabled or not self.path.exists():
             return CacheStatus(
@@ -274,6 +450,8 @@ class CacheStore:
                 expired_entries=0,
                 state_snapshots=0,
                 delivered_notifications=0,
+                dismissed_actions=0,
+                course_notes=0,
                 size_bytes=0,
             )
 
@@ -290,6 +468,12 @@ class CacheStore:
             delivered_notifications = connection.execute(
                 "SELECT count(*) FROM delivered_notifications",
             ).fetchone()[0]
+            dismissed_actions = connection.execute(
+                "SELECT count(*) FROM dismissed_actions",
+            ).fetchone()[0]
+            course_notes = connection.execute(
+                "SELECT count(*) FROM course_notes WHERE archived = 0",
+            ).fetchone()[0]
 
         return CacheStatus(
             path=self.path,
@@ -298,6 +482,8 @@ class CacheStore:
             expired_entries=expired_entries,
             state_snapshots=state_snapshots,
             delivered_notifications=delivered_notifications,
+            dismissed_actions=dismissed_actions,
+            course_notes=course_notes,
             size_bytes=self.path.stat().st_size,
         )
 
@@ -424,6 +610,37 @@ class CacheStore:
                 delivered_at TEXT NOT NULL,
                 PRIMARY KEY (scope, notification_id)
             )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS dismissed_actions (
+                scope TEXT NOT NULL,
+                action_id TEXT NOT NULL,
+                reason TEXT,
+                dismissed_at TEXT NOT NULL,
+                PRIMARY KEY (scope, action_id)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS course_notes (
+                scope TEXT NOT NULL,
+                note_id TEXT NOT NULL,
+                course_code TEXT NOT NULL,
+                body TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                archived INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (scope, note_id)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_course_notes_course
+            ON course_notes(scope, course_code, archived, updated_at DESC)
             """
         )
         return connection

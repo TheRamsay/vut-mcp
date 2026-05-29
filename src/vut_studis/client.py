@@ -2,6 +2,7 @@ from collections.abc import Awaitable, Callable
 from datetime import date, datetime, timedelta
 from hashlib import sha256
 from urllib.parse import urljoin
+from uuid import uuid4
 
 import httpx
 from pydantic import BaseModel
@@ -16,6 +17,11 @@ from vut_studis.aggregates import (
     pending_actions_from_assessment,
     pending_actions_from_assignments,
     pending_actions_from_terms,
+)
+from vut_studis.assistant import (
+    briefing_item_id_for_action,
+    briefing_item_id_for_change,
+    build_daily_briefing,
 )
 from vut_studis.cache import (
     CacheStore,
@@ -44,7 +50,10 @@ from vut_studis.models import (
     Course,
     CourseAssessment,
     CourseAssignments,
+    CourseNote,
     CourseTerms,
+    DailyBriefing,
+    DismissedAction,
     ExamTerm,
     Grade,
     PendingAction,
@@ -449,6 +458,89 @@ class StudisClient:
             scope=self._cache_scope(),
             notification_ids=notification_ids,
         )
+
+    async def get_daily_briefing(
+        self,
+        *,
+        horizon_days: int = 7,
+        force_refresh: bool = False,
+        include_changes: bool = True,
+    ) -> DailyBriefing:
+        pending_actions = await self.get_pending_actions(
+            horizon_days=horizon_days,
+            force_refresh=force_refresh,
+        )
+        notifications = []
+        if include_changes:
+            changes = await self.get_change_notifications(
+                mode="fast",
+                force_refresh=force_refresh,
+                mark_delivered=False,
+            )
+            notifications = changes.notifications
+        action_ids = [
+            *[briefing_item_id_for_action(action) for action in pending_actions],
+            *[briefing_item_id_for_change(notification) for notification in notifications],
+        ]
+        dismissed_ids = self.cache.get_dismissed_action_ids(
+            scope=self._cache_scope(),
+            action_ids=action_ids,
+        )
+
+        return build_daily_briefing(
+            pending_actions=pending_actions,
+            change_notifications=notifications,
+            course_notes=self.cache.list_course_notes(scope=self._cache_scope()),
+            dismissed_action_ids=dismissed_ids,
+            horizon_days=horizon_days,
+        )
+
+    def dismiss_briefing_item(
+        self,
+        action_id: str,
+        *,
+        reason: str | None = None,
+    ) -> DismissedAction:
+        dismissed = self.cache.dismiss_action(
+            scope=self._cache_scope(),
+            action_id=action_id,
+            reason=reason,
+        )
+        return DismissedAction(
+            action_id=dismissed.action_id,
+            reason=dismissed.reason,
+            dismissed_at=dismissed.dismissed_at,
+        )
+
+    def add_course_note(self, course_code: str, body: str) -> CourseNote:
+        note = self.cache.add_course_note(
+            scope=self._cache_scope(),
+            note_id=uuid4().hex,
+            course_code=course_code,
+            body=body,
+        )
+        return CourseNote(
+            id=note.note_id,
+            course_code=note.course_code,
+            body=note.body,
+            created_at=note.created_at,
+            updated_at=note.updated_at,
+        )
+
+    def get_course_notes(self, course_code: str | None = None) -> list[CourseNote]:
+        return [
+            CourseNote(
+                id=note.note_id,
+                course_code=note.course_code,
+                body=note.body,
+                created_at=note.created_at,
+                updated_at=note.updated_at,
+            )
+            for note in self.cache.list_course_notes(
+                scope=self._cache_scope(),
+                course_code=course_code,
+            )
+        ]
 
     def _cache_key(self, resource_type: str, *parts: str) -> str:
         key_parts = ["v1", self._cache_scope(), resource_type, *parts]

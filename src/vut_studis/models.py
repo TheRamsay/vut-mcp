@@ -129,6 +129,52 @@ class ChangeNotificationResult(StudisModel):
     suppressed_count: int = 0
 
 
+class BriefingItemType(StrEnum):
+    PENDING_ACTION = "pending_action"
+    CHANGE = "change"
+
+
+class CourseNote(StudisModel):
+    id: str
+    course_code: str
+    body: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class DismissedAction(StudisModel):
+    action_id: str
+    reason: str | None = None
+    dismissed_at: datetime
+
+
+class BriefingItem(StudisModel):
+    id: str
+    type: BriefingItemType
+    severity: PendingActionSeverity
+    title: str
+    body: str
+    course_code: str | None = None
+    action_kind: PendingActionKind | None = None
+    suggested_next_step: str | None = None
+    due_at: datetime | None = None
+    starts_at: datetime | None = None
+    days_left: int | None = None
+    detail_url: str | None = None
+
+
+class DailyBriefing(StudisModel):
+    generated_at: datetime
+    horizon_days: int
+    items: list[BriefingItem]
+    course_notes: list[CourseNote] = Field(default_factory=list)
+    dismissed_count: int = 0
+    critical_count: int = 0
+    warning_count: int = 0
+    info_count: int = 0
+    summary: list[str] = Field(default_factory=list)
+
+
 class CourseLanguage(StrEnum):
     CZECH = "cs"
     ENGLISH = "en"

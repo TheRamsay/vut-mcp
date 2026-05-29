@@ -23,6 +23,38 @@ async def vut_get_student_summary(force_refresh: bool = False):
 
 
 @mcp.tool()
+async def vut_get_daily_briefing(
+    horizon_days: int = 7,
+    force_refresh: bool = False,
+    include_changes: bool = True,
+):
+    """Get a daily assistant briefing with pending actions, changes, and local notes."""
+    return await get_studis_client().get_daily_briefing(
+        horizon_days=horizon_days,
+        force_refresh=force_refresh,
+        include_changes=include_changes,
+    )
+
+
+@mcp.tool()
+async def vut_dismiss_briefing_item(action_id: str, reason: str | None = None):
+    """Dismiss a briefing item in local memory."""
+    return get_studis_client().dismiss_briefing_item(action_id, reason=reason)
+
+
+@mcp.tool()
+async def vut_add_course_note(course_code: str, body: str):
+    """Add a local personal note for a VUT course."""
+    return get_studis_client().add_course_note(course_code, body)
+
+
+@mcp.tool()
+async def vut_get_course_notes(course_code: str | None = None):
+    """Get local personal notes for VUT courses."""
+    return get_studis_client().get_course_notes(course_code)
+
+
+@mcp.tool()
 async def vut_get_pending_actions(
     course_codes: list[str] | None = None,
     horizon_days: int | None = None,
