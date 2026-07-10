@@ -1,13 +1,44 @@
+import asyncio
 from datetime import date
 from typing import cast
 
 from fastmcp import FastMCP
 
+from vut_mcp.agenda import build_agenda
 from vut_mcp.context import get_moodle_client, get_studis_client
 from vut_mcp.payloads import course_points_payload
 from vut_studis.notifications import NotificationMode
 
 mcp = FastMCP("VUT Studis")
+
+
+@mcp.tool()
+async def vut_get_agenda(horizon_days: int = 14, force_refresh: bool = False):
+    """List a read-only, cross-source agenda of StudIS actions and Moodle deadlines."""
+    if (
+        isinstance(horizon_days, bool)
+        or not isinstance(horizon_days, int)
+        or not 1 <= horizon_days <= 90
+    ):
+        raise ValueError("horizon_days must be between 1 and 90")
+
+    studis_client = get_studis_client()
+    moodle_client = get_moodle_client()
+    studis_actions, moodle_assignments = await asyncio.gather(
+        studis_client.get_pending_actions(
+            horizon_days=horizon_days,
+            force_refresh=force_refresh,
+        ),
+        moodle_client.get_assignments(
+            course_id=None,
+            force_refresh=force_refresh,
+        ),
+    )
+    return build_agenda(
+        pending_actions=studis_actions,
+        moodle_assignments=moodle_assignments,
+        horizon_days=horizon_days,
+    )
 
 
 @mcp.tool()
@@ -68,7 +99,7 @@ async def vut_get_moodle_course_resources(
 
 @mcp.tool()
 async def vut_get_schedule(date_from: date | None = None, date_to: date | None = None):
-    """Get Studis schedule items. Currently not implemented; prefer other tools for now."""
+    """Get read-only personal StudIS schedule items, optionally filtered by inclusive dates."""
     return await get_studis_client().get_schedule(date_from=date_from, date_to=date_to)
 
 
@@ -125,6 +156,28 @@ async def vut_get_pending_actions(
 
 
 @mcp.tool()
+async def vut_get_assessment_dashboard(
+    horizon_days: int = 30,
+    include_past: bool = False,
+    force_refresh: bool = False,
+):
+    """List read-only assessment terms across courses; use StudIS itself to register or cancel."""
+    if (
+        isinstance(horizon_days, bool)
+        or not isinstance(horizon_days, int)
+        or not 1 <= horizon_days <= 180
+    ):
+        raise ValueError("horizon_days must be between 1 and 180")
+    if not isinstance(include_past, bool):
+        raise ValueError("include_past must be a boolean")
+    return await get_studis_client().get_assessment_dashboard(
+        horizon_days=horizon_days,
+        include_past=include_past,
+        force_refresh=force_refresh,
+    )
+
+
+@mcp.tool()
 async def vut_get_recent_changes(
     force_refresh: bool = True,
     include_pending_actions: bool = True,
@@ -158,6 +211,15 @@ async def vut_get_change_notifications(
 async def vut_get_courses(force_refresh: bool = False):
     """Use for the course list only. Prefer higher-level tools for planning or course health."""
     return await get_studis_client().get_courses(force_refresh=force_refresh)
+
+
+@mcp.tool()
+async def vut_get_course_updates(limit: int = 100, force_refresh: bool = False):
+    """List metadata and same-origin StudIS links only; never fetch announcement bodies."""
+    return await get_studis_client().get_course_updates(
+        limit=limit,
+        force_refresh=force_refresh,
+    )
 
 
 @mcp.tool()

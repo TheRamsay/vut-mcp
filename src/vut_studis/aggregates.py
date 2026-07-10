@@ -1,7 +1,9 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from vut_studis.errors import StudisParseError
 from vut_studis.models import (
+    AssessmentDashboard,
+    AssessmentDashboardItem,
     AssessmentEntry,
     AssessmentItem,
     Course,
@@ -10,6 +12,7 @@ from vut_studis.models import (
     CourseNote,
     CourseStatus,
     CourseStatusMode,
+    CourseTerm,
     CourseTerms,
     Grade,
     PendingAction,
@@ -18,6 +21,116 @@ from vut_studis.models import (
     PendingActionType,
     StudentSummary,
 )
+
+MAX_ASSESSMENT_DASHBOARD_COURSES = 100
+MAX_ASSESSMENT_DASHBOARD_TERMS = 500
+
+
+def build_assessment_dashboard(
+    course_terms: list[CourseTerms],
+    *,
+    now: datetime,
+    horizon_days: int,
+    include_past: bool,
+) -> AssessmentDashboard:
+    """Build a bounded, read-only cross-course view from already parsed course terms."""
+    selected_course_terms = course_terms[:MAX_ASSESSMENT_DASHBOARD_COURSES]
+    items = [
+        _assessment_dashboard_item(course, term)
+        for course in selected_course_terms
+        for term in course.terms
+        if _include_assessment_dashboard_term(
+            term.starts_at,
+            now=now,
+            horizon_days=horizon_days,
+            include_past=include_past,
+        )
+    ]
+    sorted_items = sorted(items, key=lambda item: _assessment_dashboard_sort_key(item, now=now))
+    returned_items = sorted_items[:MAX_ASSESSMENT_DASHBOARD_TERMS]
+
+    return AssessmentDashboard(
+        generated_at=now,
+        horizon_days=horizon_days,
+        include_past=include_past,
+        items=returned_items,
+        course_truncated_count=max(
+            len(course_terms) - MAX_ASSESSMENT_DASHBOARD_COURSES,
+            0,
+        ),
+        term_truncated_count=max(
+            len(sorted_items) - MAX_ASSESSMENT_DASHBOARD_TERMS,
+            0,
+        ),
+    )
+
+
+def _assessment_dashboard_item(
+    course: CourseTerms,
+    term: CourseTerm,
+) -> AssessmentDashboardItem:
+    # This explicit mapping keeps the dashboard's read-only payload clear and avoids actions.
+    return AssessmentDashboardItem(
+        course_code=course.course_code,
+        course_name=course.course_name,
+        academic_year=course.academic_year,
+        assessment_order=term.assessment_order,
+        assessment_name=term.assessment_name,
+        assessment_category=term.assessment_category,
+        term_number=term.term_number,
+        name=term.name,
+        note=term.note,
+        starts_at=term.starts_at,
+        ends_at=None,
+        examiner=term.examiner,
+        room=term.room,
+        registered=term.registered,
+        capacity_used=term.capacity_used,
+        capacity_total=term.capacity_total,
+        registration_info=term.registration_info,
+        registration_opens_at=term.registration_opens_at,
+        registration_closes_at=term.registration_closes_at,
+        can_register=term.can_register,
+        can_unregister=term.can_unregister,
+        max_points=term.max_points,
+        earned_points=term.earned_points,
+        detail_url=term.detail_url,
+    )
+
+
+def _include_assessment_dashboard_term(
+    starts_at: datetime | None,
+    *,
+    now: datetime,
+    horizon_days: int,
+    include_past: bool,
+) -> bool:
+    if starts_at is None:
+        return True
+    if not include_past and starts_at < now:
+        return False
+    return starts_at <= now + timedelta(days=horizon_days)
+
+
+def _assessment_dashboard_sort_key(
+    item: AssessmentDashboardItem,
+    *,
+    now: datetime,
+) -> tuple[int, datetime, str, str, int]:
+    if item.starts_at is not None and item.starts_at >= now and item.registered is True:
+        priority = 0
+    elif item.registered is False and item.can_register is True:
+        priority = 1
+    else:
+        priority = 2
+
+    return (
+        priority,
+        item.starts_at or datetime.max,
+        item.course_code,
+        item.name,
+        item.term_number or 0,
+    )
 
 
 def course_codes_from_grades(grades: list[Grade]) -> list[str]:

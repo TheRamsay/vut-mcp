@@ -1,6 +1,8 @@
 from vut_studis.auth import LoginAttemptResult, refresh_session_cookie
 from vut_studis.client import StudisClient
 from vut_studis.models import (
+    AssessmentDashboard,
+    AssessmentDashboardItem,
     AssessmentEntry,
     AssessmentItem,
     AssessmentMessage,
@@ -18,6 +20,8 @@ from vut_studis.models import (
     CourseTerm,
     CourseTerms,
     CourseType,
+    CourseUpdate,
+    CourseUpdates,
     DailyBriefing,
     DismissedAction,
     ExamTerm,
@@ -35,6 +39,8 @@ from vut_studis.models import (
 
 __all__ = [
     "AssignmentSubmissionFile",
+    "AssessmentDashboard",
+    "AssessmentDashboardItem",
     "AssessmentEntry",
     "AssessmentItem",
     "AssessmentMessage",
@@ -51,6 +57,8 @@ __all__ = [
     "CourseTerm",
     "CourseTerms",
     "CourseType",
+    "CourseUpdate",
+    "CourseUpdates",
     "DailyBriefing",
     "DismissedAction",
     "ExamTerm",

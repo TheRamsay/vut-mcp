@@ -83,13 +83,16 @@ Current tools:
 
 - `vut_get_student_summary`
 - `vut_get_daily_briefing`
+- `vut_get_agenda`
 - `vut_dismiss_briefing_item`
 - `vut_add_course_note`
 - `vut_get_course_notes`
 - `vut_get_pending_actions`
+- `vut_get_assessment_dashboard`
 - `vut_get_recent_changes`
 - `vut_get_change_notifications`
 - `vut_get_courses`
+- `vut_get_course_updates`
 - `vut_get_grades`
 - `vut_get_course_points`
 - `vut_get_course_status`
@@ -97,12 +100,17 @@ Current tools:
 - `vut_get_course_terms`
 - `vut_get_course_assignments`
 - `vut_get_assessment_message`
-- `vut_get_schedule` *(stub; parser not implemented yet)*
+- `vut_get_schedule` *(read-only personal schedule items, optionally filtered by date)*
 - `vut_get_moodle_courses`
 - `vut_get_moodle_assignments`
 - `vut_get_moodle_assignment_files`
 - `vut_get_moodle_assignment_file_content`
 - `vut_get_moodle_course_resources`
+
+`vut_get_course_updates` is an explicit, standalone read-only StudIS feed. It
+returns bounded update metadata and same-origin StudIS links only; it does not
+fetch or crawl announcement bodies, merge with daily briefing or notifications,
+or perform write actions.
 
 `vut_get_moodle_assignment_file_content` is an explicit, standalone read-only
 operation: provide an assignment ID and an exact URL returned by
@@ -122,6 +130,17 @@ bytes, or extracts file content.
 
 The remaining Moodle tools return only course/assignment/file metadata and
 Moodle links. No Moodle tool submits work, alters enrolment, or creates tokens.
+
+`vut_get_agenda` is a standalone, read-only cross-source timeline that combines
+StudIS pending actions with Moodle assignment deadlines. It does not replace or
+write daily briefings, and it never registers, submits, downloads, or fetches
+external resource targets.
+
+`vut_get_assessment_dashboard` is a view-only, bounded overview of existing
+per-course assessment terms. It fetches at most 100 courses and returns at most
+500 terms, reporting omitted courses, omitted terms, and courses whose term page
+could not be parsed. It never registers for or cancels a term; use StudIS
+manually for those actions.
 
 For Codex, configure the MCP server with this command:
 

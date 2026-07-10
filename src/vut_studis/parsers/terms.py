@@ -1,4 +1,4 @@
-from urllib.parse import urljoin
+from urllib.parse import parse_qs, urlsplit
 
 from selectolax.parser import HTMLParser, Node
 
@@ -14,6 +14,7 @@ from vut_studis.parsers.common import (
     parse_int,
     parse_numbered_name,
     parse_registration_window,
+    same_origin_url,
 )
 
 TERMS_HEADERS = {
@@ -121,7 +122,14 @@ def _parse_registered(text: str) -> bool | None:
 def _parse_detail_url(row: Node, base_url: str) -> str | None:
     for link in row.css("a"):
         href = link.attributes.get("href") or ""
-        if "sn=termin_detail" in href:
-            return urljoin(base_url, href)
+        url = same_origin_url(href, base_url)
+        if url is None:
+            continue
+        parsed = urlsplit(url)
+        if (
+            parsed.path == "/studis/student.phtml"
+            and parse_qs(parsed.query, keep_blank_values=True).get("sn") == ["termin_detail"]
+        ):
+            return url
 
     return None

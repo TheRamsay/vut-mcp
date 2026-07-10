@@ -1,5 +1,6 @@
+import asyncio
 from collections.abc import Awaitable, Callable
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from hashlib import sha256
 from urllib.parse import urljoin
 from uuid import uuid4
@@ -8,6 +9,8 @@ import httpx
 from pydantic import BaseModel
 
 from vut_studis.aggregates import (
+    MAX_ASSESSMENT_DASHBOARD_COURSES,
+    build_assessment_dashboard,
     build_course_status,
     build_student_summary,
     course_codes_from_grades,
@@ -40,11 +43,16 @@ from vut_studis.change_detection import (
 from vut_studis.config import Settings, load_settings
 from vut_studis.constants import (
     COURSE_DETAIL_CACHE_TTL,
+    COURSE_UPDATES_CACHE_TTL,
+    COURSE_UPDATES_PATH,
     ELECTRONIC_INDEX_PATH,
     GRADES_CACHE_TTL,
+    PERSONAL_SCHEDULE_PATH,
+    SCHEDULE_CACHE_TTL,
 )
-from vut_studis.errors import StudisAuthError
+from vut_studis.errors import StudisAuthError, StudisParseError
 from vut_studis.models import (
+    AssessmentDashboard,
     AssessmentEntry,
     AssessmentItem,
     AssessmentMessage,
@@ -56,6 +64,7 @@ from vut_studis.models import (
     CourseStatus,
     CourseStatusMode,
     CourseTerms,
+    CourseUpdates,
     DailyBriefing,
     DismissedAction,
     ExamTerm,
@@ -79,7 +88,9 @@ from vut_studis.parsers.assignments import (
     parse_assignment_submission_html,
     parse_course_assignments_html,
 )
+from vut_studis.parsers.course_updates import parse_course_updates_html
 from vut_studis.parsers.grades import parse_grades_html
+from vut_studis.parsers.schedule import parse_schedule_html
 from vut_studis.parsers.terms import parse_course_terms_html
 from vut_studis.transport import StudisTransport
 
@@ -106,12 +117,84 @@ class StudisClient:
         grades = await self.get_grades(force_refresh=force_refresh)
         return courses_from_grades(grades)
 
+    async def get_assessment_dashboard(
+        self,
+        *,
+        horizon_days: int = 30,
+        include_past: bool = False,
+        force_refresh: bool = False,
+    ) -> AssessmentDashboard:
+        if (
+            isinstance(horizon_days, bool)
+            or not isinstance(horizon_days, int)
+            or not 1 <= horizon_days <= 180
+        ):
+            raise ValueError("horizon_days must be between 1 and 180")
+        if not isinstance(include_past, bool):
+            raise ValueError("include_past must be a boolean")
+
+        all_courses = await self.get_courses(force_refresh=force_refresh)
+        courses = all_courses[:MAX_ASSESSMENT_DASHBOARD_COURSES]
+        semaphore = asyncio.Semaphore(8)
+
+        async def get_terms(course: Course) -> tuple[CourseTerms | None, str | None]:
+            async with semaphore:
+                try:
+                    return (
+                        await self.get_course_terms(
+                            course.code,
+                            force_refresh=force_refresh,
+                        ),
+                        None,
+                    )
+                except StudisParseError:
+                    return None, course.code
+
+        tasks = [asyncio.create_task(get_terms(course)) for course in courses]
+        try:
+            results = await asyncio.gather(*tasks)
+        except Exception:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
+        course_terms = [terms for terms, _ in results if terms is not None]
+        unavailable_course_codes = [course_code for _, course_code in results if course_code]
+        dashboard = build_assessment_dashboard(
+            course_terms,
+            now=datetime.now(),
+            horizon_days=horizon_days,
+            include_past=include_past,
+        )
+        return dashboard.model_copy(
+            update={
+                "course_truncated_count": max(len(all_courses) - len(courses), 0),
+                "unavailable_course_codes": unavailable_course_codes,
+            }
+        )
+
     async def get_schedule(
         self,
         date_from: date | None = None,
         date_to: date | None = None,
     ) -> list[ScheduleItem]:
-        raise NotImplementedError("Studis schedule endpoint/parser is not implemented yet.")
+        if date_from is not None and date_to is not None and date_from > date_to:
+            raise ValueError("date_from must not be after date_to")
+
+        result = await self.cache.get_or_fetch(
+            key=self._cache_key("schedule"),
+            resource_type="schedule",
+            ttl=SCHEDULE_CACHE_TTL,
+            force_refresh=False,
+            fetch=self._fetch_schedule_live,
+            encode=encode_model_list,
+            decode=lambda payload: decode_model_list(payload, ScheduleItem),
+        )
+        return _filter_schedule_by_date(result.value, date_from=date_from, date_to=date_to)
+
+    async def _fetch_schedule_live(self) -> list[ScheduleItem]:
+        html = await self._get_html(PERSONAL_SCHEDULE_PATH)
+        return parse_schedule_html(html, base_url=str(self.settings.base_url))
 
     async def get_exams(self) -> list[ExamTerm]:
         raise NotImplementedError("Studis exams endpoint/parser is not implemented yet.")
@@ -164,6 +247,43 @@ class StudisClient:
     async def _fetch_grades_live(self) -> list[Grade]:
         html = await self._get_html(ELECTRONIC_INDEX_PATH)
         return parse_grades_html(html)
+
+    async def get_course_updates(
+        self,
+        limit: int = 100,
+        *,
+        force_refresh: bool = False,
+    ) -> CourseUpdates:
+        """Return bounded course-update metadata and links without fetching announcement bodies."""
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 200:
+            raise ValueError("limit must be between 1 and 200")
+
+        result = await self.cache.get_or_fetch(
+            key=self._cache_key("course_updates"),
+            resource_type="course_updates",
+            ttl=COURSE_UPDATES_CACHE_TTL,
+            force_refresh=force_refresh,
+            fetch=self._fetch_course_updates_live,
+            encode=encode_model,
+            decode=lambda payload: decode_model(payload, CourseUpdates),
+        )
+        updates = result.value
+        omitted = max(0, len(updates.items) - limit)
+        if omitted == 0:
+            return updates
+        return updates.model_copy(
+            update={
+                "items": updates.items[:limit],
+                "truncated_count": omitted,
+            }
+        )
+
+    async def _fetch_course_updates_live(self) -> CourseUpdates:
+        html = await self._get_html(COURSE_UPDATES_PATH)
+        return parse_course_updates_html(
+            html,
+            base_url=urljoin(str(self.settings.base_url), COURSE_UPDATES_PATH),
+        )
 
     async def get_course_grades(
         self,
@@ -605,6 +725,27 @@ class StudisClient:
         identity = self.settings.username or self.settings.session_cookie or "anonymous"
         raw_scope = f"{self.settings.base_url}|{identity}"
         return sha256(raw_scope.encode("utf-8")).hexdigest()[:16]
+
+
+def _filter_schedule_by_date(
+    items: list[ScheduleItem],
+    *,
+    date_from: date | None,
+    date_to: date | None,
+) -> list[ScheduleItem]:
+    """Return items intersecting the requested inclusive local-date window."""
+    window_start = datetime.combine(date_from, time.min) if date_from is not None else None
+    window_end = (
+        datetime.combine(date_to + timedelta(days=1), time.min)
+        if date_to is not None and date_to < date.max
+        else None
+    )
+    return [
+        item
+        for item in items
+        if (window_start is None or item.ends_at > window_start)
+        and (window_end is None or item.starts_at < window_end)
+    ]
 
 
 def _find_course_detail_path(html: str, course_code: str) -> str:

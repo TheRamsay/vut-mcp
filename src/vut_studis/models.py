@@ -24,6 +24,22 @@ class Course(StudisModel):
     absolved: bool | None = None
 
 
+class CourseUpdate(StudisModel):
+    id: str
+    published_at: datetime
+    title: str
+    course_code: str
+    course_name: str
+    author: str
+    url: str | None = None
+    course_url: str | None = None
+
+
+class CourseUpdates(StudisModel):
+    items: list[CourseUpdate] = Field(default_factory=list)
+    truncated_count: int = 0
+
+
 class ScheduleItem(StudisModel):
     course_code: str | None = None
     course_name: str
@@ -32,6 +48,7 @@ class ScheduleItem(StudisModel):
     room: str | None = None
     teacher: str | None = None
     kind: str | None = None
+    detail_url: str | None = None
 
 
 class ExamTerm(StudisModel):
@@ -311,6 +328,43 @@ class CourseTerms(StudisModel):
     course_name: str | None = None
     academic_year: str | None = None
     terms: list[CourseTerm]
+
+
+class AssessmentDashboardItem(StudisModel):
+    course_code: str
+    course_name: str | None = None
+    academic_year: str | None = None
+    assessment_order: int | None = None
+    assessment_name: str | None = None
+    assessment_category: str | None = None
+    term_number: int | None = None
+    name: str
+    note: str | None = None
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    examiner: str | None = None
+    room: str | None = None
+    registered: bool | None = None
+    capacity_used: int | None = None
+    capacity_total: int | None = None
+    registration_info: str | None = None
+    registration_opens_at: datetime | None = None
+    registration_closes_at: datetime | None = None
+    can_register: bool | None = None
+    can_unregister: bool | None = None
+    max_points: float | None = None
+    earned_points: float | None = None
+    detail_url: str | None = None
+
+
+class AssessmentDashboard(StudisModel):
+    generated_at: datetime
+    horizon_days: int
+    include_past: bool
+    items: list[AssessmentDashboardItem] = Field(default_factory=list)
+    course_truncated_count: int = 0
+    term_truncated_count: int = 0
+    unavailable_course_codes: list[str] = Field(default_factory=list)
 
 
 class AssignmentSubmissionFile(StudisModel):

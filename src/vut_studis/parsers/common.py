@@ -1,6 +1,6 @@
 import re
 from datetime import datetime
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 from selectolax.parser import HTMLParser, Node
 
@@ -141,7 +141,21 @@ def find_link(node: Node, base_url: str, needle: str) -> str | None:
     for link in node.css("a"):
         href = link.attributes.get("href") or ""
         if needle in href:
-            return urljoin(base_url, href)
+            return same_origin_url(href, base_url)
 
     return None
 
+
+def same_origin_url(href: str, base_url: str) -> str | None:
+    """Resolve one HTTP(S) link only when it has the exact base origin."""
+    href = href.strip()
+    base = urlsplit(base_url)
+    if not href or base.scheme not in {"http", "https"} or not base.netloc:
+        return None
+
+    url = urljoin(base_url, href)
+    target = urlsplit(url)
+    if (target.scheme, target.netloc) != (base.scheme, base.netloc):
+        return None
+
+    return url

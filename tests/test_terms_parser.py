@@ -78,3 +78,26 @@ def test_parse_course_terms_html_extracts_registration_status() -> None:
     )
     assert terms.terms[1].registered is False
     assert terms.terms[1].can_register is True
+
+
+def test_parse_course_terms_html_discards_unsafe_detail_urls() -> None:
+    html = """
+    <h3>ABC - Test Course(a.r.2025/2026)</h3>
+    <table>
+      <tr><th>č.</th><th>Popis</th><th>Začátek</th><th>Zkoušející</th><th>Místnost</th>
+          <th>El</th><th>Registrován</th><th>Obs./max.</th><th>Informace</th>
+          <th>Max bodů</th><th>Získané</th></tr>
+      <tr>
+        <td><a href="https://evil.invalid/?sn=termin_detail">1.</a></td>
+        <td>First term</td><td>18.5.2026 9:00</td><td>Teacher</td><td>D105</td>
+        <td></td><td>NE</td><td>0/20</td><td>přihlásit</td><td>51</td><td></td>
+      </tr>
+    </table>
+    """
+
+    terms = parse_course_terms_html(
+        html,
+        base_url="https://www.vut.cz/studis/student.phtml?sn=predmet_detail&apid=123",
+    )
+
+    assert terms.terms[0].detail_url is None
