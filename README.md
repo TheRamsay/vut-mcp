@@ -101,10 +101,27 @@ Current tools:
 - `vut_get_moodle_courses`
 - `vut_get_moodle_assignments`
 - `vut_get_moodle_assignment_files`
+- `vut_get_moodle_assignment_file_content`
+- `vut_get_moodle_course_resources`
 
-The Moodle tools return only course/assignment/file metadata and Moodle links.
-They never download attachment bytes, submit work, alter enrolment, or create
-tokens.
+`vut_get_moodle_assignment_file_content` is an explicit, standalone read-only
+operation: provide an assignment ID and an exact URL returned by
+`vut_get_moodle_assignment_files` for that assignment. It supports only
+response MIME types `application/pdf`, `text/plain`, `text/markdown`,
+`text/x-markdown`, `text/csv`, and `application/json`. Downloads are capped at
+8 MiB; PDFs are capped at 50 pages; returned text defaults to 20,000 characters
+and may be increased to at most 50,000 characters. It does not support OCR,
+DOCX, images, archives, automatic downloads, indexing, embeddings, or
+background sync. Raw attachment bytes and extracted text are never persisted.
+
+`vut_get_moodle_course_resources` lists a selected course's section materials
+(file, folder, page, URL, and unknown Moodle activities), including Moodle links
+and attached-file metadata. URL activities also include their direct target URL
+when Moodle exposes it. The tool never fetches that target, downloads file
+bytes, or extracts file content.
+
+The remaining Moodle tools return only course/assignment/file metadata and
+Moodle links. No Moodle tool submits work, alters enrolment, or creates tokens.
 
 For Codex, configure the MCP server with this command:
 

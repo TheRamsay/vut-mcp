@@ -23,3 +23,7 @@ class MoodleApiError(MoodleError):
 
 class MoodleDataError(MoodleError):
     """Raised when Moodle data cannot be parsed into domain models."""
+
+
+class MoodleContentError(MoodleError):
+    """Raised when Moodle attachment content is unsafe or unsupported."""

@@ -1,17 +1,33 @@
 """Read-only Moodle client with opt-in REST and authenticated web fallback."""
 
+import asyncio
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from urllib.parse import urljoin, urlparse
 
 from vut_moodle.api import MoodleApi
-from vut_moodle.errors import MoodleApiError, MoodleConfigurationError, MoodleDataError
-from vut_moodle.models import MoodleAssignment, MoodleCourse, MoodleFile
+from vut_moodle.errors import (
+    MoodleApiError,
+    MoodleConfigurationError,
+    MoodleContentError,
+    MoodleDataError,
+)
+from vut_moodle.extraction import extract_file_content
+from vut_moodle.models import (
+    MoodleAssignment,
+    MoodleCourse,
+    MoodleCourseResource,
+    MoodleFile,
+    MoodleFileContent,
+)
 from vut_moodle.parsers import (
     parse_assignment_page,
     parse_course_assignments,
+    parse_course_resources,
     parse_dashboard_courses,
+    parse_resource_files,
+    parse_url_target,
 )
 from vut_moodle.transport import MoodleTransport
 from vut_studis.cache import CacheStore, decode_model_list, encode_model_list
@@ -20,8 +36,14 @@ from vut_studis.config import Settings, load_settings
 COURSES_TTL = timedelta(minutes=15)
 ASSIGNMENTS_TTL = timedelta(minutes=5)
 ASSIGNMENT_FILES_TTL = timedelta(minutes=60)
+COURSE_RESOURCES_TTL = timedelta(minutes=30)
 MAX_COURSES = 50
 MAX_ASSIGNMENTS = 200
+MAX_COURSE_ACTIVITIES = 300
+MAX_COURSE_RESOURCE_FILES = 500
+MAX_FILE_BYTES = 8 * 1024 * 1024
+DEFAULT_FILE_CONTENT_CHARACTERS = 20_000
+MAX_FILE_CONTENT_CHARACTERS = 50_000
 
 
 class MoodleClient:
@@ -85,6 +107,66 @@ class MoodleClient:
         )
         return result.value
 
+    async def get_assignment_file_content(
+        self,
+        assignment_id: int,
+        file_url: str,
+        *,
+        max_characters: int = DEFAULT_FILE_CONTENT_CHARACTERS,
+    ) -> MoodleFileContent:
+        """Extract bounded content from one exact file listed for an assignment."""
+        if (
+            not isinstance(max_characters, int)
+            or isinstance(max_characters, bool)
+            or not 1 <= max_characters <= MAX_FILE_CONTENT_CHARACTERS
+        ):
+            raise MoodleContentError(
+                "Moodle attachment character limit must be between 1 and "
+                f"{MAX_FILE_CONTENT_CHARACTERS}."
+            )
+        files = await self.get_assignment_files(assignment_id)
+        file = next((item for item in files if item.url == file_url), None)
+        if file is None:
+            raise MoodleContentError(
+                "Moodle attachment URL is not listed for the requested assignment."
+            )
+        data, content_type = await self.transport.download_file(file.url, max_bytes=MAX_FILE_BYTES)
+        return await asyncio.to_thread(
+            extract_file_content,
+            file,
+            data,
+            content_type,
+            max_characters,
+        )
+
+    async def get_course_resources(
+        self,
+        course_id: int,
+        *,
+        force_refresh: bool = False,
+    ) -> list[MoodleCourseResource]:
+        """List bounded, read-only material metadata for one enrolled Moodle course."""
+        course = next(
+            (
+                item
+                for item in await self.get_courses(force_refresh=force_refresh)
+                if item.id == course_id
+            ),
+            None,
+        )
+        if course is None:
+            raise MoodleDataError(f"Moodle course {course_id} was not found.")
+        result = await self.cache.get_or_fetch(
+            key=self._cache_key("moodle_course_resources", str(course_id)),
+            resource_type="moodle_course_resources",
+            ttl=COURSE_RESOURCES_TTL,
+            force_refresh=force_refresh,
+            fetch=lambda: self._fetch_course_resources(course),
+            encode=encode_model_list,
+            decode=lambda payload: decode_model_list(payload, MoodleCourseResource),
+        )
+        return result.value
+
     def _use_api(self) -> bool:
         return self.settings.moodle_access_mode == "api" or (
             self.settings.moodle_access_mode == "auto" and bool(self.settings.moodle_token)
@@ -138,6 +220,74 @@ class MoodleClient:
                 files = _files_from_api(module.get("contents"), self._moodle_url)
                 return files or assignment.files
         return assignment.files
+
+    async def _fetch_course_resources(self, course: MoodleCourse) -> list[MoodleCourseResource]:
+        if not self._use_api():
+            return await self._fetch_course_resources_web(course)
+        try:
+            return await self._fetch_course_resources_api(course)
+        except MoodleApiError:
+            if self.settings.moodle_access_mode == "api":
+                raise
+            return await self._fetch_course_resources_web(course)
+
+    async def _fetch_course_resources_api(
+        self,
+        course: MoodleCourse,
+    ) -> list[MoodleCourseResource]:
+        resources: list[MoodleCourseResource] = []
+        seen_activity_ids: set[int] = set()
+        for section in await self._api().get_course_contents(course.id):
+            section_name = _text(section.get("name")) or _text(section.get("sectionname"))
+            modules = section.get("modules")
+            if not isinstance(modules, list):
+                continue
+            for module in modules:
+                if not isinstance(module, dict):
+                    continue
+                resource = self._course_resource_from_api(module, course, section_name)
+                if resource is None or resource.activity_id in seen_activity_ids:
+                    continue
+                resources.append(resource)
+                seen_activity_ids.add(resource.activity_id)
+                _check_course_resource_limits(resources)
+        return resources
+
+    async def _fetch_course_resources_web(
+        self,
+        course: MoodleCourse,
+    ) -> list[MoodleCourseResource]:
+        course_response = await self._get_course_resource_response(course.url)
+        resources = parse_course_resources(
+            course_response.text,
+            base_url=str(course_response.url),
+            course=course,
+        )
+        _check_course_resource_limits(resources)
+        enriched: list[MoodleCourseResource] = []
+        for resource in resources:
+            files = resource.files
+            target_url = resource.target_url
+            if resource.resource_type in {"file", "folder", "url"}:
+                activity_response = await self._get_course_resource_response(resource.url)
+                if resource.resource_type in {"file", "folder"}:
+                    files = _merge_files(
+                        files,
+                        parse_resource_files(
+                            activity_response.text,
+                            base_url=str(activity_response.url),
+                        ),
+                    )
+                else:
+                    target_url = parse_url_target(
+                        activity_response.text,
+                        base_url=str(activity_response.url),
+                    )
+            enriched.append(
+                resource.model_copy(update={"files": files, "target_url": target_url})
+            )
+            _check_course_resource_limits(enriched)
+        return enriched
 
     async def _fetch_courses_api(self) -> list[MoodleCourse]:
         api = self._api()
@@ -239,6 +389,13 @@ class MoodleClient:
             )
         return MoodleApi(self.settings)
 
+    async def _get_course_resource_response(self, url: str):
+        """Use redirect-safe HTML retrieval when the transport supports it."""
+        get_response = getattr(self.transport, "get_same_origin_response", None)
+        if get_response is None:
+            get_response = self.transport.get_response
+        return await get_response(url)
+
     def _assignment_from_api(
         self,
         payload: dict[object, object],
@@ -258,6 +415,35 @@ class MoodleClient:
             cutoff_at=_unix_datetime(payload.get("cutoffdate")),
             submission_status=_submission_status(payload.get("submissionstatus")),
             files=_files_from_api(payload.get("introattachments"), self._moodle_url),
+        )
+
+    def _course_resource_from_api(
+        self,
+        payload: dict[object, object],
+        course: MoodleCourse,
+        section_name: str | None,
+    ) -> MoodleCourseResource | None:
+        activity_id = _positive_int(payload.get("id"))
+        name = _text(payload.get("name"))
+        module_name = _text(payload.get("modname"))
+        if activity_id is None or name is None or module_name is None:
+            return None
+        resource_type = {
+            "resource": "file",
+            "folder": "folder",
+            "page": "page",
+            "url": "url",
+        }.get(module_name, "unknown")
+        if not module_name.isascii() or not module_name.isidentifier():
+            return None
+        return MoodleCourseResource(
+            course_id=course.id,
+            activity_id=activity_id,
+            section_name=section_name,
+            name=name,
+            resource_type=resource_type,
+            url=self._moodle_url(f"/mod/{module_name}/view.php?id={activity_id}"),
+            files=_resource_files_from_api(payload.get("contents"), self._moodle_url),
         )
 
     def _moodle_url(self, url: str) -> str:
@@ -322,6 +508,70 @@ def _files_from_api(value: object, url: Callable[[str], str]) -> list[MoodleFile
             )
         )
     return files
+
+
+def _resource_files_from_api(value: object, url: Callable[[str], str]) -> list[MoodleFile]:
+    """Map API attachment metadata to session-safe, token-free Moodle file URLs."""
+    if not isinstance(value, list):
+        return []
+    files: list[MoodleFile] = []
+    seen_urls: set[str] = set()
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        name = _text(item.get("filename"))
+        file_url = _text(item.get("fileurl"))
+        if not name or not file_url:
+            continue
+        try:
+            absolute_url = url(file_url)
+        except MoodleDataError:
+            continue
+        parsed = urlparse(absolute_url)
+        if parsed.path.startswith("/webservice/pluginfile.php/"):
+            path = parsed.path.removeprefix("/webservice")
+        elif parsed.path.startswith("/pluginfile.php/"):
+            path = parsed.path
+        else:
+            continue
+        safe_url = parsed._replace(path=path, params="", query="", fragment="").geturl()
+        if safe_url in seen_urls:
+            continue
+        files.append(
+            MoodleFile(
+                name=name,
+                url=safe_url,
+                size_bytes=_positive_int(item.get("filesize")),
+                mimetype=_text(item.get("mimetype")),
+                modified_at=_unix_datetime(item.get("timemodified")),
+            )
+        )
+        seen_urls.add(safe_url)
+    return files
+
+
+def _merge_files(*groups: list[MoodleFile]) -> list[MoodleFile]:
+    files: list[MoodleFile] = []
+    seen_urls: set[str] = set()
+    for group in groups:
+        for file in group:
+            if file.url in seen_urls:
+                continue
+            files.append(file)
+            seen_urls.add(file.url)
+    return files
+
+
+def _check_course_resource_limits(resources: list[MoodleCourseResource]) -> None:
+    if len(resources) > MAX_COURSE_ACTIVITIES:
+        raise MoodleDataError(
+            f"Moodle course activity limit of {MAX_COURSE_ACTIVITIES} exceeded."
+        )
+    file_count = sum(len(resource.files) for resource in resources)
+    if file_count > MAX_COURSE_RESOURCE_FILES:
+        raise MoodleDataError(
+            f"Moodle course file limit of {MAX_COURSE_RESOURCE_FILES} exceeded."
+        )
 
 
 def _origin(url: str) -> tuple[str, str, int | None]:

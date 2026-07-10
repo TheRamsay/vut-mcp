@@ -13,6 +13,8 @@ def test_studis_transport_imports() -> None:
 
 
 def test_moodle_client_is_publicly_importable() -> None:
-    from vut_moodle import MoodleClient
+    from vut_moodle import MoodleClient, MoodleCourseResource, extract_file_content
 
     assert MoodleClient.__name__ == "MoodleClient"
+    assert MoodleCourseResource.__name__ == "MoodleCourseResource"
+    assert extract_file_content.__name__ == "extract_file_content"

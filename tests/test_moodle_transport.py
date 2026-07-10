@@ -4,7 +4,7 @@ import httpx
 import pytest
 import respx
 
-from vut_moodle.errors import MoodleAuthError
+from vut_moodle.errors import MoodleAuthError, MoodleContentError
 from vut_moodle.transport import MoodleTransport
 from vut_studis.config import Settings
 
@@ -126,6 +126,23 @@ async def test_moodle_transport_rejects_off_origin_url_without_a_request(tmp_pat
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_same_origin_response_does_not_follow_external_redirect(tmp_path: Path) -> None:
+    external = respx.get("https://evil.example/landing").mock(
+        return_value=httpx.Response(200, html="<title>Unexpected</title>")
+    )
+    respx.get("https://moodle.vut.cz/course/view.php?id=42").mock(
+        return_value=httpx.Response(302, headers={"location": "https://evil.example/landing"})
+    )
+    transport = MoodleTransport(_settings(), env_path=tmp_path / ".env")
+
+    with pytest.raises(MoodleAuthError, match="redirects"):
+        await transport.get_same_origin_response("/course/view.php?id=42")
+
+    assert external.call_count == 0
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_off_origin_redirect_cookie_cannot_replace_moodle_session(tmp_path: Path) -> None:
     env_path = tmp_path / ".env"
     env_path.write_text('VUT_MOODLE_SESSION_COOKIE="MoodleSession=old"\n')
@@ -155,6 +172,114 @@ async def test_off_origin_redirect_cookie_cannot_replace_moodle_session(tmp_path
     settings = _settings(moodle_session_cookie="MoodleSession=old")
 
     await MoodleTransport(settings, env_path=env_path).get_response("/my/")
+
+    assert redirected_cookie_headers == ["MoodleSession=old"]
+    assert settings.moodle_session_cookie == "MoodleSession=old"
+    assert env_path.read_text() == 'VUT_MOODLE_SESSION_COOKIE="MoodleSession=old"\n'
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_download_rejects_off_origin_and_non_pluginfile_urls_without_a_request(
+    tmp_path: Path,
+) -> None:
+    evil_route = respx.get("https://evil.example/pluginfile.php/17/file").mock(
+        return_value=httpx.Response(200, content=b"unexpected")
+    )
+    page_route = respx.get("https://moodle.vut.cz/mod/assign/view.php?id=17").mock(
+        return_value=httpx.Response(200, content=b"unexpected")
+    )
+    transport = MoodleTransport(_settings(), env_path=tmp_path / ".env")
+
+    with pytest.raises(MoodleAuthError, match="configured Moodle origin"):
+        await transport.download_file("https://evil.example/pluginfile.php/17/file", max_bytes=4)
+    with pytest.raises(MoodleContentError, match="pluginfile"):
+        await transport.download_file("/mod/assign/view.php?id=17", max_bytes=4)
+
+    assert evil_route.call_count == 0
+    assert page_route.call_count == 0
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_download_rejects_declared_and_streamed_byte_limit(tmp_path: Path) -> None:
+    respx.get("https://moodle.vut.cz/pluginfile.php/17/declared").mock(
+        return_value=httpx.Response(200, headers={"content-length": "5"}, content=b"12345")
+    )
+    respx.get("https://moodle.vut.cz/pluginfile.php/17/chunked").mock(
+        return_value=httpx.Response(200, content=b"12345")
+    )
+    transport = MoodleTransport(_settings(), env_path=tmp_path / ".env")
+
+    with pytest.raises(MoodleContentError, match="byte limit"):
+        await transport.download_file("/pluginfile.php/17/declared", max_bytes=4)
+    with pytest.raises(MoodleContentError, match="byte limit"):
+        await transport.download_file("/pluginfile.php/17/chunked", max_bytes=4)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_download_refreshes_once_and_returns_content_type(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def refresh(settings: Settings) -> str:
+        assert settings.moodle_session_cookie == "MoodleSession=expired"
+        return "MoodleSession=fresh"
+
+    monkeypatch.setattr("vut_moodle.transport.refresh_moodle_session_cookie", refresh)
+    respx.get("https://moodle.vut.cz/pluginfile.php/17/file").mock(
+        side_effect=[
+            httpx.Response(302, headers={"location": "/login/index.php"}),
+            httpx.Response(
+                200,
+                headers={"content-type": "text/plain; charset=utf-8"},
+                content=b"ok",
+            ),
+        ]
+    )
+    respx.get("https://moodle.vut.cz/login/index.php").mock(
+        return_value=httpx.Response(200, html="<title>Login</title>")
+    )
+
+    data, content_type = await MoodleTransport(
+        _settings(), env_path=tmp_path / ".env"
+    ).download_file("/pluginfile.php/17/file", max_bytes=4)
+
+    assert data == b"ok"
+    assert content_type == "text/plain; charset=utf-8"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_download_off_origin_redirect_cannot_replace_moodle_session(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text('VUT_MOODLE_SESSION_COOKIE="MoodleSession=old"\n')
+    redirected_cookie_headers: list[str | None] = []
+    respx.get("https://moodle.vut.cz/pluginfile.php/17/file").mock(
+        return_value=httpx.Response(302, headers={"location": "https://evil.example/landing"})
+    )
+    respx.get("https://evil.example/landing").mock(
+        return_value=httpx.Response(
+            302,
+            headers={
+                "location": "https://moodle.vut.cz/pluginfile.php/17/final",
+                "set-cookie": "MoodleSession=attacker; Domain=moodle.vut.cz; Path=/",
+            },
+        )
+    )
+
+    def final_response(request: httpx.Request) -> httpx.Response:
+        redirected_cookie_headers.append(request.headers.get("cookie"))
+        return httpx.Response(200, content=b"unexpected")
+
+    respx.get("https://moodle.vut.cz/pluginfile.php/17/final").mock(side_effect=final_response)
+    settings = _settings(moodle_session_cookie="MoodleSession=old")
+
+    with pytest.raises(MoodleAuthError, match="redirects"):
+        await MoodleTransport(settings, env_path=env_path).download_file(
+            "/pluginfile.php/17/file", max_bytes=4
+        )
 
     assert redirected_cookie_headers == ["MoodleSession=old"]
     assert settings.moodle_session_cookie == "MoodleSession=old"

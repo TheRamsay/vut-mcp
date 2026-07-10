@@ -41,6 +41,32 @@ async def vut_get_moodle_assignment_files(
 
 
 @mcp.tool()
+async def vut_get_moodle_assignment_file_content(
+    assignment_id: int,
+    file_url: str,
+    max_characters: int = 20_000,
+):
+    """Extract bounded text from one exact file URL listed for a Moodle assignment."""
+    return await get_moodle_client().get_assignment_file_content(
+        assignment_id,
+        file_url,
+        max_characters=max_characters,
+    )
+
+
+@mcp.tool()
+async def vut_get_moodle_course_resources(
+    course_id: int,
+    force_refresh: bool = False,
+):
+    """List Moodle course material metadata and links; never downloads file content."""
+    return await get_moodle_client().get_course_resources(
+        course_id,
+        force_refresh=force_refresh,
+    )
+
+
+@mcp.tool()
 async def vut_get_schedule(date_from: date | None = None, date_to: date | None = None):
     """Get Studis schedule items. Currently not implemented; prefer other tools for now."""
     return await get_studis_client().get_schedule(date_from=date_from, date_to=date_to)
