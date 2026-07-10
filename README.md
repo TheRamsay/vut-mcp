@@ -47,9 +47,29 @@ uv run vut-studis-debug login-refresh-session
 ```
 
 The command updates `VUT_SESSION_COOKIE` in `.env`. Studis sessions expire, so
-the client automatically refreshes the cookie and retries once when
-`VUT_USERNAME` and `VUT_PASSWORD` are configured. You can still run the command
-manually when you want to refresh the session explicitly.
+the client uses `VUT_USERNAME` and `VUT_PASSWORD` to log in again and retries the
+failed request once. Only cookies applicable to the Studis URL are persisted;
+cookies returned by Studis during normal requests are carried forward
+automatically. You can still run the command manually to force a new session.
+
+### Moodle setup
+
+Moodle is a separate, read-only data source. Add only the values you intend to
+use:
+
+```env
+VUT_MOODLE_BASE_URL=https://moodle.vut.cz
+VUT_MOODLE_ACCESS_MODE=auto
+VUT_MOODLE_TOKEN=
+VUT_MOODLE_SESSION_COOKIE=
+```
+
+In `auto` mode, a user-provided `VUT_MOODLE_TOKEN` enables Moodle's REST API;
+without one, the client uses the authenticated Moodle web UI. `api` requires a
+token and fails clearly when a required function is unavailable; `web` never
+sends a token. The client may use `VUT_USERNAME` and `VUT_PASSWORD` only to
+obtain a Moodle session through VUT SSO. `VUT_MOODLE_SESSION_COOKIE` is separate
+from `VUT_SESSION_COOKIE`. No token is created automatically.
 
 ## MCP
 
@@ -78,6 +98,13 @@ Current tools:
 - `vut_get_course_assignments`
 - `vut_get_assessment_message`
 - `vut_get_schedule` *(stub; parser not implemented yet)*
+- `vut_get_moodle_courses`
+- `vut_get_moodle_assignments`
+- `vut_get_moodle_assignment_files`
+
+The Moodle tools return only course/assignment/file metadata and Moodle links.
+They never download attachment bytes, submit work, alter enrolment, or create
+tokens.
 
 For Codex, configure the MCP server with this command:
 

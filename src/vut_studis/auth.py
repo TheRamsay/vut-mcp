@@ -1,8 +1,10 @@
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from http.cookiejar import CookieJar
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
+from urllib.request import Request
 
 import httpx
 from selectolax.parser import HTMLParser
@@ -48,8 +50,8 @@ class LoginAttemptResult:
 
 async def refresh_session_cookie(settings: Settings | None = None) -> str:
     result = await login_with_password(settings)
-    if not result.authenticated:
-        raise StudisAuthError("Login did not reach an authenticated Studis page.")
+    if not result.authenticated or not result.session_cookie:
+        raise StudisAuthError("Login did not produce an authenticated Studis session.")
 
     return result.session_cookie
 
@@ -141,16 +143,29 @@ async def inspect_login_flow(settings: Settings | None = None) -> list[LoginPage
 
 async def login_with_password(settings: Settings | None = None) -> LoginAttemptResult:
     settings = settings or load_settings()
+    return await login_via_vut_sso(
+        settings,
+        entry_url=urljoin(str(settings.base_url), ELECTRONIC_INDEX_PATH),
+        target_origin=str(settings.base_url),
+        authenticated=_looks_authenticated,
+    )
+
+
+async def login_via_vut_sso(
+    settings: Settings,
+    *,
+    entry_url: str,
+    target_origin: str,
+    authenticated: Callable[[httpx.Response], bool],
+) -> LoginAttemptResult:
     if not settings.username or not settings.password:
         raise StudisAuthError("VUT_USERNAME and VUT_PASSWORD must be configured in .env.")
 
-    entry_url = urljoin(str(settings.base_url), ELECTRONIC_INDEX_PATH)
     async with httpx.AsyncClient(
         follow_redirects=True,
         timeout=settings.http_timeout_seconds,
     ) as client:
-        entry_response = await client.get(entry_url)
-        home_response = await _follow_login_meta_refresh(client, entry_response)
+        home_response = await _follow_login_meta_refresh(client, await client.get(entry_url))
 
         username_action, username_payload = _form_values(
             home_response.text,
@@ -167,27 +182,87 @@ async def login_with_password(settings: Settings | None = None) -> LoginAttemptR
             required_field="passwd",
         )
         password_payload["passwd"] = settings.password
-        if "fingerprintData" in password_payload and not password_payload["fingerprintData"]:
-            password_payload["fingerprintData"] = json.dumps(
-                {
-                    "language": [["en-US"], ["en-US", "en"]],
-                    "javascriptEnable": True,
-                    "timezone": "Europe/Prague",
-                },
-                separators=(",", ":"),
-            )
+        _set_fingerprint_payload(password_payload)
 
-        final_response = await client.post(password_action, data=password_payload)
-        final_response = await _follow_login_meta_refresh(client, final_response)
+        final_response = await _follow_login_meta_refresh(
+            client,
+            await client.post(password_action, data=password_payload),
+        )
+        if target_form_post := _target_form_post(
+            final_response,
+            target_origin=target_origin,
+        ):
+            target_action, target_payload = target_form_post
+            final_response = await _follow_login_meta_refresh(
+                client,
+                await client.post(target_action, data=target_payload),
+            )
 
     return LoginAttemptResult(
         final_url=str(final_response.url),
         status_code=final_response.status_code,
-        authenticated=_looks_authenticated(final_response),
+        authenticated=authenticated(final_response),
         cookie_names=sorted(cookie.name for cookie in client.cookies.jar),
-        session_cookie=_cookie_header(client.cookies.jar),
+        session_cookie=_cookie_header_for_url(client.cookies.jar, entry_url),
         title=_parse_title(final_response.text),
     )
+
+
+def _set_fingerprint_payload(payload: dict[str, str]) -> None:
+    if "fingerprintData" in payload and not payload["fingerprintData"]:
+        payload["fingerprintData"] = json.dumps(
+            {
+                "language": [["en-US"], ["en-US", "en"]],
+                "javascriptEnable": True,
+                "timezone": "Europe/Prague",
+            },
+            separators=(",", ":"),
+        )
+
+
+def _target_form_post(
+    response: httpx.Response,
+    *,
+    target_origin: str,
+) -> tuple[str, dict[str, str]] | None:
+    normalized_target_origin = _origin(target_origin)
+    tree = HTMLParser(response.text)
+    for form in tree.css("form"):
+        values: dict[str, str] = {}
+        has_state = False
+        for input_node in form.css("input"):
+            name = input_node.attributes.get("name")
+            if not name:
+                if form.css_first('input[name="state"]') is not None:
+                    raise StudisAuthError("OIDC target form has an unnamed input.")
+                continue
+            values[name] = input_node.attributes.get("value") or ""
+            has_state = has_state or name == "state"
+
+        if not has_state:
+            continue
+
+        if (form.attributes.get("method") or "get").lower() != "post":
+            raise StudisAuthError("OIDC target form must use POST.")
+
+        action = urljoin(str(response.url), form.attributes.get("action") or str(response.url))
+        if _origin(action) != normalized_target_origin:
+            raise StudisAuthError("OIDC target form action must use the target origin.")
+        return action, values
+
+    return None
+
+
+def _origin(url: str) -> tuple[str, str, int | None] | None:
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.hostname:
+        return None
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
+    scheme = parsed.scheme.casefold()
+    return scheme, parsed.hostname.casefold(), port or {"http": 80, "https": 443}.get(scheme)
 
 
 def _snapshot_response(requested_url: str, response: httpx.Response) -> LoginPageSnapshot:
@@ -253,14 +328,44 @@ def _password_url(response: httpx.Response) -> str | None:
     return None
 
 
+def is_login_response(response: httpx.Response) -> bool:
+    url = str(response.url).casefold()
+    title = (_parse_title(response.text) or "").casefold()
+    tree = HTMLParser(response.text)
+    has_login_form = any(
+        input_node.attributes.get("name") in {"login", "passwd"}
+        for form in tree.css("form")
+        for input_node in form.css("input")
+    )
+    return (
+        "/auth/common/" in url
+        or "jednotné přihlášení vut" in title
+        or has_login_form
+    )
+
+
 def _looks_authenticated(response: httpx.Response) -> bool:
-    final_url = str(response.url)
-    if "/studis/" in final_url and "student.phtml" in final_url:
-        return True
+    if not 200 <= response.status_code < 300:
+        return False
 
-    title = (_parse_title(response.text) or "").lower()
-    return "studis" in title and "jednotné přihlášení" not in title
+    if is_login_response(response):
+        return False
+
+    final_path = urlparse(str(response.url)).path.casefold()
+    if not final_path.startswith("/studis/") or not final_path.endswith("student.phtml"):
+        return False
+
+    title = (_parse_title(response.text) or "").casefold()
+    if any(
+        marker in title
+        for marker in ("access denied", "maintenance", "odstávka", "přístup odepřen")
+    ):
+        return False
+
+    return "studis" in title or "elektronický index" in title
 
 
-def _cookie_header(cookie_jar: CookieJar) -> str:
-    return "; ".join(f"{cookie.name}={cookie.value}" for cookie in cookie_jar)
+def _cookie_header_for_url(cookie_jar: CookieJar, url: str) -> str:
+    request = Request(url)
+    cookie_jar.add_cookie_header(request)
+    return request.get_header("Cookie") or ""

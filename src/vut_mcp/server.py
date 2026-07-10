@@ -3,11 +3,41 @@ from typing import cast
 
 from fastmcp import FastMCP
 
-from vut_mcp.context import get_studis_client
+from vut_mcp.context import get_moodle_client, get_studis_client
 from vut_mcp.payloads import course_points_payload
 from vut_studis.notifications import NotificationMode
 
 mcp = FastMCP("VUT Studis")
+
+
+@mcp.tool()
+async def vut_get_moodle_courses(force_refresh: bool = False):
+    """List courses available to the student in VUT Moodle."""
+    return await get_moodle_client().get_courses(force_refresh=force_refresh)
+
+
+@mcp.tool()
+async def vut_get_moodle_assignments(
+    course_id: int | None = None,
+    force_refresh: bool = False,
+):
+    """List Moodle assignment deadlines and submission states; read-only."""
+    return await get_moodle_client().get_assignments(
+        course_id=course_id,
+        force_refresh=force_refresh,
+    )
+
+
+@mcp.tool()
+async def vut_get_moodle_assignment_files(
+    assignment_id: int,
+    force_refresh: bool = False,
+):
+    """List attachment metadata and Moodle URLs; never downloads file bytes."""
+    return await get_moodle_client().get_assignment_files(
+        assignment_id,
+        force_refresh=force_refresh,
+    )
 
 
 @mcp.tool()
