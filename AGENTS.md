@@ -25,4 +25,4 @@ Minimal guidance for agents working in this repository.
 - Keep `vut_mcp` orchestration-only; put Studis-specific logic in `vut_studis`.
 - Add or update focused tests for parser/client behavior changes.
 - Preserve existing user changes in the worktree; do not revert unrelated edits.
-
+- Keep agent-only planning artifacts under `docs/superpowers/` local; never stage or commit them.
